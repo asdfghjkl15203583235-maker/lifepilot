@@ -268,11 +268,34 @@ async def update_task(
         task.started_at = datetime.now(timezone.utc)
     if body.status == TaskStatus.DONE and task.completed_at is None:
         task.completed_at = datetime.now(timezone.utc)
+    if body.status == TaskStatus.DONE:
+        # Deadline reminders are scheduled ahead of due time, so one would still
+        # fire after the user has already ticked the task off.
+        await cancel_pending_task_reminders(session, task.id)
     task.last_tracked_at = datetime.now(timezone.utc)
 
     await session.flush()
     await session.refresh(task)
     return task
+
+
+async def cancel_pending_task_reminders(session: AsyncSession, task_id: uuid.UUID) -> int:
+    """Best-effort cancel of a task's still-pending reminders.
+
+    `get_due_reminders` only filters on `status == PENDING` and `remind_at`, so a
+    reminder left behind after its task is done or deleted keeps firing — the user
+    marks the task complete and is reminded again half an hour later.
+    """
+    from services.reminder_service import cancel_task_reminders
+
+    try:
+        cancelled_count = await cancel_task_reminders(session, task_id)
+    except Exception as exc:
+        logger.warning("Failed to cancel reminders for task %s: %s", task_id, exc)
+        return 0
+    if cancelled_count:
+        logger.info("Cancelled %d pending reminder(s) for task %s", cancelled_count, task_id)
+    return cancelled_count
 
 
 async def delete_task(
@@ -284,14 +307,9 @@ async def delete_task(
     task = await get_task_for_user(session, task_id=task_id, user_id=user_id)
     if task is None:
         return False
-    # 先取消该任务的 pending 提醒（FK 是 SET NULL，仅删 task 会让 reminder
-    # 变孤儿并在到期时继续发通知）。CANCELLED 不再被 get_due_reminders 拾取。
-    from services.reminder_service import cancel_task_reminders
-
-    try:
-        await cancel_task_reminders(session, task_id)
-    except Exception as exc:
-        logger.warning("Failed to cancel reminders for task %s: %s", task_id, exc)
+    # FK is SET NULL, so deleting the task alone would leave the reminder orphaned
+    # and still deliverable at its due time.
+    await cancel_pending_task_reminders(session, task_id)
     await session.delete(task)
     await session.flush()
     return True
