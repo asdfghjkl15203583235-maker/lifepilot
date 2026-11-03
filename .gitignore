@@ -1,0 +1,58 @@
+# Terraform — state, vars, plugin dir (commit .terraform.lock.hcl for reproducible applies)
+infra/terraform.tfvars
+infra/.terraform/
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+*.tfstate.lock.info
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage*
+coverage.xml
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+**/.venv_missing/
+
+# Google OAuth client JSON from Cloud Console — never commit (see credentials.example.json)
+backend/credentials.json
+
+# Claude Code local overrides
+.claude/settings.local.json
+
+# Environment — committed templates stay tracked
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+
+# IDE and editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+
+# Logs
+*.log
+.claude/
+
+# Smoke/scratch artifacts that capture real user data — never commit
+backend/smoke_*.json
+backend/*smoke*.json
+backend/e2e/*_report.txt

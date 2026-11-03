@@ -1,0 +1,10 @@
+.venv
+.venv_missing
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.env
+credentials.json
+*.egg-info
+.git

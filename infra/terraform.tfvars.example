@@ -1,0 +1,27 @@
+aws_region  = "us-east-1"
+app_name    = "chief-of-staff"
+environment = "prod"
+
+# Optional: CloudFront price class (default in variables.tf: PriceClass_100 = US, Canada, Europe, Israel)
+# cloudfront_price_class = "PriceClass_200"
+
+# Database
+db_username = "postgres"
+db_password = "change-me-strong-password"
+db_name     = "chiefofstaff"
+
+# Secrets
+jwt_secret         = "change-me-32-char-random-string"
+openrouter_api_key = ""
+google_client_id   = ""
+google_client_secret = ""
+notion_client_id   = ""
+notion_client_secret = ""
+voyageai_api_key   = ""
+groq_api_key       = ""
+
+# LangSmith (optional — tracing in prod when key is set)
+# langsmith_tracing_enabled = true
+# langsmith_api_key         = ""
+# langsmith_project         = "chief-of-staff"
+# langsmith_api_url         = ""  # default: LangSmith cloud API

@@ -1,0 +1,97 @@
+﻿........................................................................ [ 98%]
+.                                                                        [100%]
+============================== warnings summary ===============================
+agents\graph.py:24
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\agents\graph.py:24: LangGraphDeprecatedSinceV10: Importing Send from langgraph.constants is deprecated. Please use 'from langgraph.types import Send' instead. Deprecated in LangGraph V1.0 to be removed in V2.0.
+    from langgraph.constants import Send
+
+tests/test_planner_orchestration.py::PlannerSingleStepPersistenceTests::test_planner_keeps_direct_task_in_mixed_intents_without_persisting_it
+tests/test_planner_orchestration.py::PlannerSingleStepPersistenceTests::test_read_only_query_step_is_not_persisted_as_task
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py:622: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return [row[0] for row in result.all()]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_planner_orchestration.py::PlannerTemporalDueAtTests::test_temporal_single_step_persists_clean_title_and_correct_due_at
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py:622: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  Coroutine created at (most recent call last)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py", line 118, in run
+      return self._loop.run_until_complete(task)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+      self.run_forever()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+      self._run_once()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 2032, in _run_once
+      handle._run()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\events.py", line 89, in _run
+      self._context.run(self._callback, *self._args)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\tests\test_planner_orchestration.py", line 398, in test_temporal_single_step_persists_clean_title_and_correct_due_at
+      result = await planner_node(state, FakePlanner())
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\agents\planner_agent_node.py", line 502, in planner_node
+      rules = await get_planner_rules(db_session, user_id)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py", line 622, in get_planner_rules
+      return [row[0] for row in result.all()]
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1167, in __call__
+      return self._mock_call(*args, **kwargs)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1171, in _mock_call
+      return self._execute_mock_call(*args, **kwargs)
+    return [row[0] for row in result.all()]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_planner_orchestration.py::PlannerTemporalDueAtTests::test_temporal_single_step_persists_clean_title_and_correct_due_at
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\.venv\Lib\site-packages\_pytest\stash.py:108: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  Coroutine created at (most recent call last)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+      self.run_forever()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+      self._run_once()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 2032, in _run_once
+      handle._run()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\events.py", line 89, in _run
+      self._context.run(self._callback, *self._args)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\tests\test_planner_orchestration.py", line 398, in test_temporal_single_step_persists_clean_title_and_correct_due_at
+      result = await planner_node(state, FakePlanner())
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\agents\planner_agent_node.py", line 614, in planner_node
+      conflicts = await find_schedule_conflicts(
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\schedule_conflict_service.py", line 87, in find_schedule_conflicts
+      for event in await _overlapping_events(session, user_id, window_start, window_end):
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\schedule_conflict_service.py", line 41, in _overlapping_events
+      return list(result.scalars().all())
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1167, in __call__
+      return self._mock_call(*args, **kwargs)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1171, in _mock_call
+      return self._execute_mock_call(*args, **kwargs)
+    del self._storage[key]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_planner_orchestration.py::PlannerForceReplanTests::test_forced_replan_rebuilds_instead_of_reusing_old_tasks
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py:622: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  Coroutine created at (most recent call last)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py", line 118, in run
+      return self._loop.run_until_complete(task)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+      self.run_forever()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+      self._run_once()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 2032, in _run_once
+      handle._run()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\events.py", line 89, in _run
+      self._context.run(self._callback, *self._args)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\tests\test_planner_orchestration.py", line 490, in test_forced_replan_rebuilds_instead_of_reusing_old_tasks
+      result = await planner_node(state, FakePlanner())
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\agents\planner_agent_node.py", line 502, in planner_node
+      rules = await get_planner_rules(db_session, user_id)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py", line 622, in get_planner_rules
+      return [row[0] for row in result.all()]
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1167, in __call__
+      return self._mock_call(*args, **kwargs)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1171, in _mock_call
+      return self._execute_mock_call(*args, **kwargs)
+    return [row[0] for row in result.all()]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+73 passed, 6 warnings in 6.73s

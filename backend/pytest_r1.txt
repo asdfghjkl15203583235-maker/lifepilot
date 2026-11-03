@@ -1,0 +1,519 @@
+﻿.FFF.FF.F............................................................... [ 92%]
+FFFF..                                                                   [100%]
+================================== FAILURES ===================================
+________ MapCityScopeTests.test_geocode_fallback_still_scoped_to_city _________
+
+self = <tests.test_life_map_poi_and_route.MapCityScopeTests testMethod=test_geocode_fallback_still_scoped_to_city>
+
+    async def test_geocode_fallback_still_scoped_to_city(self) -> None:
+        calls: list[tuple[str, dict]] = []
+        self._patch(calls, poi_payload={"status": "1", "info": "OK", "pois": []})
+    
+>       result = await client.get_map_context(_settings(), query="����㳡", city="�Ϻ�")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_life_map_poi_and_route.py:173: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+query = '����㳡', latitude = None, longitude = None, city = '�Ϻ�'
+
+    async def get_map_context(
+        settings: Settings,
+        *,
+        query: str,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a human-readable map context for a place/address.
+    
+        `city` �ǻỰ��ȷ�ϣ����ֵ������ĳ��У�һ������������ΪӲ��Χ��
+        POI ������ `citylimit=true`���������� `city`��������ȫ����ƥ�䡣
+        """
+        provider = (settings.map_provider or "open_meteo").lower()
+        if provider == "amap":
+            if not settings.amap_api_key:
+>               raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E               services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:594: LifeServiceError
+______________ MapCityScopeTests.test_missing_places_report_note ______________
+
+self = <tests.test_life_map_poi_and_route.MapCityScopeTests testMethod=test_missing_places_report_note>
+
+    async def test_missing_places_report_note(self) -> None:
+        async def fake_amap_get(url: str, params: dict) -> dict:
+            if url == client.AMAP_POI_TEXT_URL:
+                return {"status": "1", "info": "OK", "pois": []}
+            return {"status": "1", "info": "OK", "geocodes": []}
+    
+        with patch.object(client, "_amap_get", new=fake_amap_get):
+>           result = await client.get_map_context(_settings(), query="���ǲ����", city="�Ϻ�")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_life_map_poi_and_route.py:197: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+query = '���ǲ����', latitude = None, longitude = None, city = '�Ϻ�'
+
+    async def get_map_context(
+        settings: Settings,
+        *,
+        query: str,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a human-readable map context for a place/address.
+    
+        `city` �ǻỰ��ȷ�ϣ����ֵ������ĳ��У�һ������������ΪӲ��Χ��
+        POI ������ `citylimit=true`���������� `city`��������ȫ����ƥ�䡣
+        """
+        provider = (settings.map_provider or "open_meteo").lower()
+        if provider == "amap":
+            if not settings.amap_api_key:
+>               raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E               services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:594: LifeServiceError
+_________ MapCityScopeTests.test_poi_search_sends_city_and_citylimit __________
+
+self = <tests.test_life_map_poi_and_route.MapCityScopeTests testMethod=test_poi_search_sends_city_and_citylimit>
+
+    async def test_poi_search_sends_city_and_citylimit(self) -> None:
+        calls: list[tuple[str, dict]] = []
+        self._patch(calls)
+    
+>       result = await client.get_map_context(_settings(), query="��̲", city="�Ϻ�")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_life_map_poi_and_route.py:154: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+query = '��̲', latitude = None, longitude = None, city = '�Ϻ�'
+
+    async def get_map_context(
+        settings: Settings,
+        *,
+        query: str,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a human-readable map context for a place/address.
+    
+        `city` �ǻỰ��ȷ�ϣ����ֵ������ĳ��У�һ������������ΪӲ��Χ��
+        POI ������ `citylimit=true`���������� `city`��������ȫ����ƥ�䡣
+        """
+        provider = (settings.map_provider or "open_meteo").lower()
+        if provider == "amap":
+            if not settings.amap_api_key:
+>               raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E               services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:594: LifeServiceError
+____ RoutePlanningTests.test_transit_route_requires_city_and_reports_lines ____
+
+self = <tests.test_life_map_poi_and_route.RoutePlanningTests testMethod=test_transit_route_requires_city_and_reports_lines>
+
+    async def test_transit_route_requires_city_and_reports_lines(self) -> None:
+        calls: list[tuple[str, dict]] = []
+        self._patch(calls, TRANSIT_PAYLOAD)
+    
+>       result = await client.get_route_planning(
+            _settings(),
+            origin_latitude=31.2397,
+            origin_longitude=121.4903,
+            destination_latitude=31.2323,
+            destination_longitude=121.4750,
+            mode="transit",
+            city="�Ϻ�",
+        )
+
+tests\test_life_map_poi_and_route.py:239: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+origin_latitude = 31.2397, origin_longitude = 121.4903
+destination_latitude = 31.2323, destination_longitude = 121.475
+mode = 'transit', city = '�Ϻ�'
+
+    async def get_route_planning(
+        settings: Settings,
+        *,
+        origin_latitude: float,
+        origin_longitude: float,
+        destination_latitude: float,
+        destination_longitude: float,
+        mode: str = "walking",
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Plan a route between two coordinates and return distance + duration.
+    
+        `mode`: walking / transit / driving. ����/����·�߱�������У�ȱʡʱ�����
+        ��������õ��ĳ��в��ϡ�������ߵ»ᱨ INSUFFICIENT_PRIVILEGES �����
+        �������е���·��
+        """
+        provider = (settings.map_provider or "open_meteo").lower()
+        if provider != "amap":
+            raise LifeServiceError("amap", 0, "·���滮Ŀǰ��֧�ָߵµ�ͼ��MAP_PROVIDER=amap��")
+        if not settings.amap_api_key:
+>           raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E           services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:804: LifeServiceError
+________ RoutePlanningTests.test_transit_without_city_uses_origin_city ________
+
+self = <tests.test_life_map_poi_and_route.RoutePlanningTests testMethod=test_transit_without_city_uses_origin_city>
+
+    async def test_transit_without_city_uses_origin_city(self) -> None:
+        calls: list[tuple[str, dict]] = []
+    
+        async def fake_amap_get(url: str, params: dict) -> dict:
+            calls.append((url, dict(params)))
+            if url == client.AMAP_REGEO_URL:
+                return REGEO_PAYLOAD
+            return TRANSIT_PAYLOAD
+    
+        with patch.object(client, "_amap_get", new=fake_amap_get):
+>           result = await client.get_route_planning(
+                _settings(),
+                origin_latitude=31.2397,
+                origin_longitude=121.4903,
+                destination_latitude=31.2323,
+                destination_longitude=121.4750,
+                mode="transit",
+            )
+
+tests\test_life_map_poi_and_route.py:264: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+origin_latitude = 31.2397, origin_longitude = 121.4903
+destination_latitude = 31.2323, destination_longitude = 121.475
+mode = 'transit', city = None
+
+    async def get_route_planning(
+        settings: Settings,
+        *,
+        origin_latitude: float,
+        origin_longitude: float,
+        destination_latitude: float,
+        destination_longitude: float,
+        mode: str = "walking",
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Plan a route between two coordinates and return distance + duration.
+    
+        `mode`: walking / transit / driving. ����/����·�߱�������У�ȱʡʱ�����
+        ��������õ��ĳ��в��ϡ�������ߵ»ᱨ INSUFFICIENT_PRIVILEGES �����
+        �������е���·��
+        """
+        provider = (settings.map_provider or "open_meteo").lower()
+        if provider != "amap":
+            raise LifeServiceError("amap", 0, "·���滮Ŀǰ��֧�ָߵµ�ͼ��MAP_PROVIDER=amap��")
+        if not settings.amap_api_key:
+>           raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E           services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:804: LifeServiceError
+_____ RoutePlanningTests.test_walking_route_returns_distance_and_duration _____
+
+self = <tests.test_life_map_poi_and_route.RoutePlanningTests testMethod=test_walking_route_returns_distance_and_duration>
+
+    async def test_walking_route_returns_distance_and_duration(self) -> None:
+        calls: list[tuple[str, dict]] = []
+        self._patch(calls, WALKING_PAYLOAD)
+    
+>       result = await client.get_route_planning(
+            _settings(),
+            origin_latitude=31.2397,
+            origin_longitude=121.4903,
+            destination_latitude=31.2323,
+            destination_longitude=121.4750,
+            mode="walking",
+        )
+
+tests\test_life_map_poi_and_route.py:217: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+origin_latitude = 31.2397, origin_longitude = 121.4903
+destination_latitude = 31.2323, destination_longitude = 121.475
+mode = 'walking', city = None
+
+    async def get_route_planning(
+        settings: Settings,
+        *,
+        origin_latitude: float,
+        origin_longitude: float,
+        destination_latitude: float,
+        destination_longitude: float,
+        mode: str = "walking",
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Plan a route between two coordinates and return distance + duration.
+    
+        `mode`: walking / transit / driving. ����/����·�߱�������У�ȱʡʱ�����
+        ��������õ��ĳ��в��ϡ�������ߵ»ᱨ INSUFFICIENT_PRIVILEGES �����
+        �������е���·��
+        """
+        provider = (settings.map_provider or "open_meteo").lower()
+        if provider != "amap":
+            raise LifeServiceError("amap", 0, "·���滮Ŀǰ��֧�ָߵµ�ͼ��MAP_PROVIDER=amap��")
+        if not settings.amap_api_key:
+>           raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E           services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:804: LifeServiceError
+_____________ AmapProviderTests.test_adcode_input_skips_geocoding _____________
+
+self = <tests.test_life_service_amap.AmapProviderTests testMethod=test_adcode_input_skips_geocoding>
+
+    async def test_adcode_input_skips_geocoding(self) -> None:
+        calls: list[tuple[str, dict]] = []
+        self._patch_amap(calls)
+    
+>       result = await client.get_weather(_settings(), city="310000")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_life_service_amap.py:121: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+latitude = None, longitude = None, city = '310000'
+
+    async def get_weather(
+        settings: Settings,
+        *,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a normalized weather summary for the configured/default location."""
+        provider = (settings.weather_provider or "open_meteo").lower()
+        lat = latitude if latitude is not None else settings.weather_latitude
+        lon = longitude if longitude is not None else settings.weather_longitude
+    
+        if provider == "amap":
+            if not settings.amap_api_key:
+>               raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E               services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:375: LifeServiceError
+______ AmapProviderTests.test_city_name_resolves_to_adcode_and_is_cached ______
+
+self = <tests.test_life_service_amap.AmapProviderTests testMethod=test_city_name_resolves_to_adcode_and_is_cached>
+
+    async def test_city_name_resolves_to_adcode_and_is_cached(self) -> None:
+        calls: list[tuple[str, dict]] = []
+        self._patch_amap(calls)
+    
+>       first = await client.get_weather(_settings(), city="�Ϻ�")
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_life_service_amap.py:101: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+latitude = None, longitude = None, city = '�Ϻ�'
+
+    async def get_weather(
+        settings: Settings,
+        *,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a normalized weather summary for the configured/default location."""
+        provider = (settings.weather_provider or "open_meteo").lower()
+        lat = latitude if latitude is not None else settings.weather_latitude
+        lon = longitude if longitude is not None else settings.weather_longitude
+    
+        if provider == "amap":
+            if not settings.amap_api_key:
+>               raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E               services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:375: LifeServiceError
+________________ AmapProviderTests.test_coordinates_use_regeo _________________
+
+self = <tests.test_life_service_amap.AmapProviderTests testMethod=test_coordinates_use_regeo>
+
+    async def test_coordinates_use_regeo(self) -> None:
+        calls: list[tuple[str, dict]] = []
+        self._patch_amap(calls)
+    
+>       result = await client.get_weather(_settings(), latitude=31.19, longitude=121.40)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_life_service_amap.py:134: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+latitude = 31.19, longitude = 121.4, city = None
+
+    async def get_weather(
+        settings: Settings,
+        *,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a normalized weather summary for the configured/default location."""
+        provider = (settings.weather_provider or "open_meteo").lower()
+        lat = latitude if latitude is not None else settings.weather_latitude
+        lon = longitude if longitude is not None else settings.weather_longitude
+    
+        if provider == "amap":
+            if not settings.amap_api_key:
+>               raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E               services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:375: LifeServiceError
+_________ AmapProviderTests.test_map_context_returns_geocoded_places __________
+
+self = <tests.test_life_service_amap.AmapProviderTests testMethod=test_map_context_returns_geocoded_places>
+
+    async def test_map_context_returns_geocoded_places(self) -> None:
+        calls: list[tuple[str, dict]] = []
+        self._patch_amap(calls)
+    
+>       result = await client.get_map_context(_settings(), query="����㳡")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_life_service_amap.py:145: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+settings = Settings(api_host='0.0.0.0', api_port=8081, openrouter_api_key=None, openrouter_base_url='https://openrouter.ai/api/v1...langsmith_api_url=None, langfuse_public_key=None, langfuse_secret_key=None, langfuse_host='https://cloud.langfuse.com')
+query = '����㳡', latitude = None, longitude = None, city = None
+
+    async def get_map_context(
+        settings: Settings,
+        *,
+        query: str,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        city: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a human-readable map context for a place/address.
+    
+        `city` �ǻỰ��ȷ�ϣ����ֵ������ĳ��У�һ������������ΪӲ��Χ��
+        POI ������ `citylimit=true`���������� `city`��������ȫ����ƥ�䡣
+        """
+        provider = (settings.map_provider or "open_meteo").lower()
+        if provider == "amap":
+            if not settings.amap_api_key:
+>               raise LifeServiceError("amap", 0, "��Ҫ���� AMAP_API_KEY")
+E               services.life_service_client.LifeServiceError: amap API 0: ��Ҫ���� AMAP_API_KEY
+
+services\life_service_client.py:594: LifeServiceError
+============================== warnings summary ===============================
+agents\graph.py:24
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\agents\graph.py:24: LangGraphDeprecatedSinceV10: Importing Send from langgraph.constants is deprecated. Please use 'from langgraph.types import Send' instead. Deprecated in LangGraph V1.0 to be removed in V2.0.
+    from langgraph.constants import Send
+
+tests/test_planner_orchestration.py::PlannerSingleStepPersistenceTests::test_planner_keeps_direct_task_in_mixed_intents_without_persisting_it
+tests/test_planner_orchestration.py::PlannerSingleStepPersistenceTests::test_read_only_query_step_is_not_persisted_as_task
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py:622: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return [row[0] for row in result.all()]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_planner_orchestration.py::PlannerTemporalDueAtTests::test_temporal_single_step_persists_clean_title_and_correct_due_at
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py:622: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  Coroutine created at (most recent call last)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py", line 118, in run
+      return self._loop.run_until_complete(task)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+      self.run_forever()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+      self._run_once()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 2032, in _run_once
+      handle._run()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\events.py", line 89, in _run
+      self._context.run(self._callback, *self._args)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\tests\test_planner_orchestration.py", line 398, in test_temporal_single_step_persists_clean_title_and_correct_due_at
+      result = await planner_node(state, FakePlanner())
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\agents\planner_agent_node.py", line 502, in planner_node
+      rules = await get_planner_rules(db_session, user_id)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py", line 622, in get_planner_rules
+      return [row[0] for row in result.all()]
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1167, in __call__
+      return self._mock_call(*args, **kwargs)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1171, in _mock_call
+      return self._execute_mock_call(*args, **kwargs)
+    return [row[0] for row in result.all()]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_planner_orchestration.py::PlannerTemporalDueAtTests::test_temporal_single_step_persists_clean_title_and_correct_due_at
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\.venv\Lib\site-packages\_pytest\stash.py:108: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  Coroutine created at (most recent call last)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+      self.run_forever()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+      self._run_once()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 2032, in _run_once
+      handle._run()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\events.py", line 89, in _run
+      self._context.run(self._callback, *self._args)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\tests\test_planner_orchestration.py", line 398, in test_temporal_single_step_persists_clean_title_and_correct_due_at
+      result = await planner_node(state, FakePlanner())
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\agents\planner_agent_node.py", line 614, in planner_node
+      conflicts = await find_schedule_conflicts(
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\schedule_conflict_service.py", line 87, in find_schedule_conflicts
+      for event in await _overlapping_events(session, user_id, window_start, window_end):
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\schedule_conflict_service.py", line 41, in _overlapping_events
+      return list(result.scalars().all())
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1167, in __call__
+      return self._mock_call(*args, **kwargs)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1171, in _mock_call
+      return self._execute_mock_call(*args, **kwargs)
+    del self._storage[key]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_planner_orchestration.py::PlannerForceReplanTests::test_forced_replan_rebuilds_instead_of_reusing_old_tasks
+  C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py:622: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  Coroutine created at (most recent call last)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py", line 118, in run
+      return self._loop.run_until_complete(task)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 712, in run_until_complete
+      self.run_forever()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 683, in run_forever
+      self._run_once()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\base_events.py", line 2032, in _run_once
+      handle._run()
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\asyncio\events.py", line 89, in _run
+      self._context.run(self._callback, *self._args)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\tests\test_planner_orchestration.py", line 490, in test_forced_replan_rebuilds_instead_of_reusing_old_tasks
+      result = await planner_node(state, FakePlanner())
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\agents\planner_agent_node.py", line 502, in planner_node
+      rules = await get_planner_rules(db_session, user_id)
+    File "C:\Users\lifang wang\Desktop\multiagent\chief-of-staff\backend\services\memory_service.py", line 622, in get_planner_rules
+      return [row[0] for row in result.all()]
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1167, in __call__
+      return self._mock_call(*args, **kwargs)
+    File "C:\Users\lifang wang\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py", line 1171, in _mock_call
+      return self._execute_mock_call(*args, **kwargs)
+    return [row[0] for row in result.all()]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_life_map_poi_and_route.py::MapCityScopeTests::test_geocode_fallback_still_scoped_to_city
+FAILED tests/test_life_map_poi_and_route.py::MapCityScopeTests::test_missing_places_report_note
+FAILED tests/test_life_map_poi_and_route.py::MapCityScopeTests::test_poi_search_sends_city_and_citylimit
+FAILED tests/test_life_map_poi_and_route.py::RoutePlanningTests::test_transit_route_requires_city_and_reports_lines
+FAILED tests/test_life_map_poi_and_route.py::RoutePlanningTests::test_transit_without_city_uses_origin_city
+FAILED tests/test_life_map_poi_and_route.py::RoutePlanningTests::test_walking_route_returns_distance_and_duration
+FAILED tests/test_life_service_amap.py::AmapProviderTests::test_adcode_input_skips_geocoding
+FAILED tests/test_life_service_amap.py::AmapProviderTests::test_city_name_resolves_to_adcode_and_is_cached
+FAILED tests/test_life_service_amap.py::AmapProviderTests::test_coordinates_use_regeo
+FAILED tests/test_life_service_amap.py::AmapProviderTests::test_map_context_returns_geocoded_places
+10 failed, 68 passed, 6 warnings in 8.98s

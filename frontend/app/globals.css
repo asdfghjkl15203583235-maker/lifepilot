@@ -1,0 +1,362 @@
+@import "tailwindcss";
+
+/*
+ * 背景图必须写成普通工具类：`bg-[url('...')]` 的任意值会让 Turbopack 把引号
+ * 转义成 `&#x27;` 后再当模块解析，报 "Can't resolve '&#x27;/assets/ai-bg.jpg&'"。
+ */
+.bg-ai-hero {
+  background-image: url("/assets/ai-bg.jpg");
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  /* Scrollbars — baby pink track; thumb slightly deeper for affordance */
+  --scrollbar-track-baby-pink: #ffe5f0;
+  --scrollbar-thumb-baby-pink: #ffc2d8;
+  --scrollbar-thumb-baby-pink-hover: #ffb0c8;
+  --scrollbar-size: 8px;
+  /* Slow strip + panel — keep in sync with CHAT_TAB_ENTER_DURATION_MS in glass-workspace.tsx */
+  --chat-tab-enter-duration: 1200ms;
+  --chat-panel-enter-duration: 1200ms;
+  --chat-tab-expand-max-width: 17rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-poppins);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* ── Scrollbars: baby pink; no bar when content does not overflow (use overflow-auto, not scroll) ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb-baby-pink) var(--scrollbar-track-baby-pink);
+}
+
+/* ── Sidebar task list scrollbar: subtle in dark mode ── */
+.sidebar-task-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.sidebar-task-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-task-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-task-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+}
+
+.sidebar-task-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+/* ── Dashboard panels (memories / reminders / service records): subtle dark thin scrollbar ── */
+.dark-panel-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.dark-panel-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dark-panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dark-panel-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.16);
+  border-radius: 9999px;
+}
+
+.dark-panel-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+*::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track-baby-pink);
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb-baby-pink);
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-baby-pink-hover);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track-baby-pink);
+}
+
+/* New tab grows in width so the row reflows and existing tabs move aside gradually */
+@keyframes chat-tab-grow-in {
+  from {
+    max-width: 0;
+  }
+
+  to {
+    max-width: var(--chat-tab-expand-max-width);
+  }
+}
+
+@keyframes chat-panel-slide-in {
+  from {
+    transform: translateX(1rem);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-chat-tab-enter {
+  box-sizing: border-box;
+  overflow: hidden;
+  animation: chat-tab-grow-in var(--chat-tab-enter-duration)
+    cubic-bezier(0.42, 0, 0.58, 1) forwards;
+}
+
+.animate-chat-panel-enter {
+  animation: chat-panel-slide-in var(--chat-panel-enter-duration)
+    cubic-bezier(0.42, 0, 0.58, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-chat-tab-enter,
+  .animate-chat-panel-enter {
+    animation: none;
+  }
+}
+
+/* iMessage-style: newest user bubble enters from below — duration ~480ms */
+@keyframes chat-message-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-chat-message-enter {
+  animation: chat-message-bubble-in 0.48s cubic-bezier(0.2, 0.82, 0.22, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-chat-message-enter {
+    animation: none;
+  }
+}
+
+/* ── Orb bounce — waiting for API response ── */
+@keyframes orb-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-orb-bounce {
+  animation: orb-bounce 0.8s ease-in-out infinite;
+}
+
+/* ── Orb spin — inline typing cursor while text is being revealed ── */
+@keyframes orb-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-orb-spin {
+  animation: orb-spin 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-orb-bounce,
+  .animate-orb-spin {
+    animation: none;
+  }
+}
+
+/* ── Markdown prose styles inside assistant bubbles ── */
+.assistant-markdown h1,
+.assistant-markdown h2,
+.assistant-markdown h3,
+.assistant-markdown h4 {
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.25em;
+  line-height: 1.35;
+}
+
+.assistant-markdown h1 {
+  font-size: 1.25em;
+}
+
+.assistant-markdown h2 {
+  font-size: 1.125em;
+}
+
+.assistant-markdown h3 {
+  font-size: 1em;
+}
+
+.assistant-markdown p {
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
+}
+
+.assistant-markdown ul,
+.assistant-markdown ol {
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
+  padding-left: 1.5em;
+}
+
+.assistant-markdown ul {
+  list-style-type: disc;
+}
+
+.assistant-markdown ol {
+  list-style-type: decimal;
+}
+
+.assistant-markdown li {
+  margin-top: 0.15em;
+  margin-bottom: 0.15em;
+}
+
+.assistant-markdown code {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.assistant-markdown pre {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.assistant-markdown pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.85em;
+}
+
+.assistant-markdown blockquote {
+  border-left: 3px solid rgba(168, 85, 247, 0.5);
+  padding-left: 0.75em;
+  margin-left: 0;
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.assistant-markdown a {
+  color: rgb(168, 148, 255);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.assistant-markdown a:hover {
+  color: rgb(200, 180, 255);
+}
+
+.assistant-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  margin: 0.75em 0;
+}
+
+.assistant-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  font-size: 0.9em;
+}
+
+.assistant-markdown th,
+.assistant-markdown td {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.35em 0.6em;
+  text-align: left;
+}
+
+.assistant-markdown th {
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 600;
+}
+
+.assistant-markdown strong {
+  font-weight: 600;
+}
+
+.assistant-markdown em {
+  font-style: italic;
+}
+
+/* ── Reminder toast: breathing light ──────────────────────────────────────────
+   Violet dot that pulses (like a notification LED) to draw attention without
+   blocking. Paired with the bottom-right ReminderToastHost. */
+.reminder-breathing-dot {
+  animation: reminder-breath 2.2s ease-in-out infinite;
+  box-shadow: 0 0 8px 1px rgba(167, 139, 250, 0.55);
+}
+
+@keyframes reminder-breath {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.72);
+  }
+}
+

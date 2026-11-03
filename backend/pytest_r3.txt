@@ -1,0 +1,21 @@
+﻿F........                                                                [100%]
+================================== FAILURES ===================================
+________ TravelSearchStepTests.test_planner_expansion_adds_search_step ________
+
+self = <tests.test_search_agent_and_batch_tasks.TravelSearchStepTests testMethod=test_planner_expansion_adds_search_step>
+
+    def test_planner_expansion_adds_search_step(self) -> None:
+        expanded = expand_travel_tasks(
+            [{"id": "step-1", "route": "direct", "intent": "������ĩ������"}],
+            latest_user_text="������ĩ������",
+            core_intent=None,
+            plan_id="p2",
+            include_search=True,
+        )
+>       self.assertEqual([step["route"] for step in expanded].count("search"), 1)
+E       AssertionError: 0 != 1
+
+tests\test_search_agent_and_batch_tasks.py:71: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_search_agent_and_batch_tasks.py::TravelSearchStepTests::test_planner_expansion_adds_search_step
+1 failed, 8 passed in 5.63s
