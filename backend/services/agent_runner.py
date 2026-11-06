@@ -15,7 +15,11 @@ from fastapi import BackgroundTasks
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agents.common import CONTEXT_ISOLATION_RULE as _SHARED_CONTEXT_ISOLATION_RULE
+from agents.common import (
+    CONTEXT_ISOLATION_RULE as _SHARED_CONTEXT_ISOLATION_RULE,
+    TASK_STATUS_FAILED,
+    TASK_STATUS_SUCCESS,
+)
 from agents.compiled_graph_cache import get_compiled_agent_graph
 from agents.context import is_tool_payload
 from agents.core_intent import build_core_intent
@@ -765,6 +769,75 @@ _NODE_STATUS_MESSAGES: dict[str, str] = {
     "merge_results": "Putting it all together...",
 }
 
+# 思考轨迹：随流式节点执行顺序记录的执行轨迹（中文），作为可折叠"思考过程"
+# 面板的内容。它由编排图确定性地产生，不依赖模型是否输出 reasoning_content。
+_NODE_TRACE_MESSAGES: dict[str, str] = {
+    "orchestrate": "理解你的需求",
+    "planner": "拆解执行计划",
+    "email_agent": "查询邮件",
+    "calendar_agent": "查询日程",
+    "notion_agent": "检索 Notion",
+    "direct_reply": "组织回复",
+    "life_agent": "查询天气与地点",
+    "supervisor": "检查执行进度",
+    "merge_results": "汇总结果",
+}
+
+# 每个 agent 结果的 route → 中文标签，用于把"思考过程"面板从节点名细化到
+# "这一步具体做了什么、结果如何"。route 可能为空（direct 兜底），用原始值兜底。
+_ROUTE_TRACE_LABELS: dict[str, str] = {
+    "life": "天气/地点",
+    "email": "邮件",
+    "calendar": "日程",
+    "notion": "Notion",
+    "search": "搜索",
+    "direct": "直接回复",
+}
+# 单条 agent 结果的 intent / result 摘要上限：面板是折叠块，截断避免刷屏。
+_AGENT_TRACE_INTENT_CHARS = 60
+_AGENT_TRACE_DETAIL_CHARS = 120
+
+
+def _render_agent_trace_line(item: dict[str, Any]) -> str:
+    """把一条 agent 执行结果渲染成一行中文摘要（做了什么 + 成/败 + 关键信息）。
+
+    这是"思考过程"面板的具体内容来源：只列节点名（"查询天气与地点"）看不出
+    哪一步失败、为什么失败；这里把 intent、成败标记与 result/error 摘要拼出来。
+    """
+    route = str(item.get("route") or "")
+    label = _ROUTE_TRACE_LABELS.get(route, route or "步骤")
+    intent = str(item.get("intent") or "").strip().replace("\n", " ")[:_AGENT_TRACE_INTENT_CHARS]
+    status = str(item.get("task_status") or "")
+    if status == TASK_STATUS_FAILED:
+        detail = str(item.get("error") or item.get("result") or "").strip()
+        mark = "失败"
+    elif status == TASK_STATUS_SUCCESS:
+        detail = str(item.get("result") or "").strip()
+        mark = "完成"
+    else:
+        detail = str(item.get("result") or item.get("error") or "").strip()
+        mark = "部分完成"
+    detail = detail.replace("\n", " ")[:_AGENT_TRACE_DETAIL_CHARS]
+    if not intent:
+        return f"[{label}] {mark}"
+    if detail:
+        return f"[{label}] {intent}：{mark}——{detail}"
+    return f"[{label}] {intent}：{mark}"
+
+
+def _build_trace_text(node_lines: list[str], agent_lines: list[str]) -> str:
+    """把节点执行轨迹与具体 agent 结果拼成可折叠面板的多行文本。
+
+    面板用 whitespace-pre-wrap 渲染，所以用换行而非箭头把"具体步骤"分开，
+    用户能一眼看到每一步做了什么、哪一步失败及其原因。
+    """
+    blocks: list[str] = []
+    if node_lines:
+        blocks.append(" → ".join(node_lines))
+    if agent_lines:
+        blocks.append("\n".join(f"{index}. {line}" for index, line in enumerate(agent_lines, 1)))
+    return "\n\n".join(blocks)
+
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
@@ -1370,6 +1443,12 @@ async def _run_chat_turn(
 
     final_answer = ""
     seen_nodes: set[str] = set()
+    # 思考轨迹：按节点执行顺序累积的中文执行轨迹，作为可折叠"思考过程"面板内容。
+    trace_lines: list[str] = []
+    # 具体步骤结果：每个 agent 做了什么、成败与原因，追加在节点轨迹之后，
+    # 让"思考过程"面板能直接看出哪一步失败、为什么失败（不再只有节点名）。
+    agent_result_lines: list[str] = []
+    seen_agent_results: set[tuple[Any, ...]] = set()
     # 出错时用它拼出已经生成的部分回复，避免整轮对话丢失。
     streamed_chunks: list[str] = []
     collector = TokenCollector(on_token=streamed_chunks.append)
@@ -1407,6 +1486,9 @@ async def _run_chat_turn(
                 ):
                     seen_nodes.add(node)
                     publish({"type": "status", "message": _NODE_STATUS_MESSAGES[node]})
+                    trace_lines.append(
+                        _NODE_TRACE_MESSAGES.get(node, _NODE_STATUS_MESSAGES[node])
+                    )
 
                 if ev_type == "on_chain_end":
                     output = event.get("data", {}).get("output", {})
@@ -1418,6 +1500,24 @@ async def _run_chat_turn(
                             action_id = item.get("action_id")
                             if action_id:
                                 pending_action_refs[str(action_id)] = item
+                        for item in output.get("agent_results") or []:
+                            if not isinstance(item, dict):
+                                continue
+                            # agent_results 是 operator.add 累积的，同一节点可能被
+                            # 重试/重放；用 (task_key, attempt, route, intent) 去重，
+                            # 避免同一条结果在面板里出现两遍。
+                            fingerprint = (
+                                str(item.get("task_key") or ""),
+                                str(item.get("attempt") or ""),
+                                str(item.get("route") or ""),
+                                str(item.get("intent") or ""),
+                            )
+                            if fingerprint in seen_agent_results:
+                                continue
+                            seen_agent_results.add(fingerprint)
+                            line = _render_agent_trace_line(item)
+                            if line:
+                                agent_result_lines.append(line)
 
                 _emit_tokens()
             trace_scope.set_output(final_answer or None)
@@ -1490,7 +1590,12 @@ async def _run_chat_turn(
             },
         })
 
-    publish({"type": "done", "content": final_answer, "elapsed": elapsed})
+    publish({
+        "type": "done",
+        "content": final_answer,
+        "elapsed": elapsed,
+        "trace": _build_trace_text(trace_lines, agent_result_lines),
+    })
 
     if client_conversation_id and final_answer.strip():
         first_user_text = _refine_first_message_text(message_payloads)

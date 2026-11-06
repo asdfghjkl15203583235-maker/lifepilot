@@ -62,6 +62,11 @@ class FollowUpDetectionTests(unittest.TestCase):
     def test_full_new_request_is_not_followup(self) -> None:
         self.assertFalse(is_followup_utterance("帮我查一下北京的天气"))
 
+    def test_bare_confirmation_is_followup(self) -> None:
+        # 真实 badcase：助手问"需要我算到门口的路程吗"，用户回"需要"。
+        for word in ("需要", "好的", "行", "可以", "对"):
+            self.assertTrue(is_followup_utterance(word), word)
+
 
 class CoreIntentDerivationTests(unittest.TestCase):
     def test_followup_inherits_anchor_route_and_city(self) -> None:
@@ -77,6 +82,23 @@ class CoreIntentDerivationTests(unittest.TestCase):
         # 追问的 query 必须把 anchor 主题带回来，供下游 agent 直接执行。
         self.assertIn("山西榆次", core["query"])
         self.assertIn("后天", core["query"])
+
+    def test_bare_confirmation_carries_assistant_offer(self) -> None:
+        """裸确认"需要"必须把上一轮助手的提议（推荐地点 + 待答问题）带进 query。"""
+        payloads = [
+            _u("查看榆次今天的天气，并找一个适合短时专注的好去处"),
+            _a("推荐晋中市图书馆（首选）和书包客自习室。需要我算到门口的路程时间吗？"),
+            _u("需要"),
+        ]
+        core = build_core_intent(payloads)
+        self.assertTrue(core["followup"])
+        self.assertEqual(core["route"], "life")
+        self.assertIn("上轮助手提议", core["query"])
+        self.assertIn("晋中市图书馆", core["query"])
+        self.assertTrue(core["assistant_offer"])
+        # render 出来的核心上下文也要带这条提议，分类 LLM 才能判断"需要"在回答什么。
+        rendered = render_core_intent(core)
+        self.assertIn("晋中市图书馆", rendered)
 
     def test_fresh_topic_overrides_anchor(self) -> None:
         payloads = [

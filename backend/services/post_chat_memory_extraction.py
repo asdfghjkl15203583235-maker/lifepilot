@@ -6,7 +6,6 @@ Keeping this off the LangGraph critical path avoids an extra LLM round-trip bloc
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import uuid
@@ -25,21 +24,34 @@ from services.memory_service import (
     soft_delete_memory,
     strip_superseded_notes,
 )
+from services.structured_output import (
+    JSON_OBJECT_RESPONSE_FORMAT,
+    extract_json_array,
+    extract_json_payload,
+    extract_json_value,
+)
 
 logger = logging.getLogger(__name__)
 
 # Route decision → LLM once per fact. Lightweight call; fails open to a plain ADD.
 MEMORY_DECISION_SIMILAR_MEMORIES = 3
 
+# json_object 模式下顶层必须是对象，所以事实数组套一层 "facts"。
+_FACT_LIST_KEYS = ("facts", "memories", "items", "results")
+
 MEMORY_EXTRACTION_SYSTEM_PROMPT = """\
 You are a memory extraction agent for a personal assistant called Chief of Staff.
 Analyze the conversation and identify any new, stable facts about the user worth
 remembering long-term.
 
-For each fact, return a JSON array:
-[
-    {"text": "<1-2 sentence fact>", "category": "<category>"}
-]
+Return STRICTLY ONE json object, no other text:
+{"facts": [{"text": "<1-2 sentence fact>", "category": "<category>"}]}
+
+OUTPUT FORMAT — HARD REQUIREMENT, HIGHEST PRIORITY:
+- 仅输出合法的 json 字符串。严禁包含任何解释性文字，严禁使用 ```json 等 Markdown 代码块包裹。
+- Output nothing but the json object: no preamble, no "好的", no trailing note, no code fence.
+- The reply MUST start with `{` and end with `}`; it is parsed by json.loads() with no post-processing.
+- If there are no new facts worth remembering, output {"facts": []}.
 
 Categories:
 - fact: a stable, general fact about the user (background, habits, circumstances)
@@ -54,7 +66,7 @@ Categories:
 Rules:
 - Only extract stable, meaningful facts — not one-off questions or greetings.
 - Keep each fact to 1-2 sentences maximum.
-- If there are no new facts worth remembering, return an empty array: []
+- If there are no new facts worth remembering, return {"facts": []}
 - Do NOT extract facts already present in the [USER BIO] or [RELEVANT MEMORY] \
 sections of the conversation (those are already saved).
 - Rules explicitly and persistently expressed ("以后帮我……", "记得每次都……") \
@@ -151,16 +163,23 @@ English is a violation and must be rewritten in pure Chinese.
 
 
 def _extract_json_array(text: str) -> list[dict[str, Any]]:
-    """Parse a JSON array from LLM output, tolerating markdown fences."""
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        lines = [line for line in lines if not line.strip().startswith("```")]
-        cleaned = "\n".join(lines).strip()
-    parsed = json.loads(cleaned)
-    if isinstance(parsed, list):
-        return parsed
-    return []
+    """Parse the extractor reply into a list of facts.
+
+    容错依次覆盖：```json 围栏、前后解释性文字、轻微语法错误（json_repair）、
+    以及模型把数组包成 {"facts": [...]} 的情况（json_object 模式要求顶层是对象）。
+    解析不出来时返回空列表而不是抛异常 —— 调用方会用确定性补抽兜底。
+    """
+    items = extract_json_array(text) or []
+    if not items:
+        # 模型可能把事实包在 {"facts": [...]} 里；数组切片会直接命中，这里只兜底带其他键的形态。
+        payload = extract_json_payload(text)
+        if payload is not None:
+            for key in _FACT_LIST_KEYS:
+                value = payload.get(key)
+                if isinstance(value, list):
+                    items = value
+                    break
+    return [item for item in items if isinstance(item, dict)]
 
 
 def is_explicit_preference(text: str) -> bool:
@@ -199,6 +218,13 @@ def _missing_explicit_preferences(
         # 一句话可能包含多个偏好（"我最喜欢拿铁，不过现在更爱美式"），逐个分句
         # 判断是否已被 LLM 覆盖；只被覆盖一半时，另一半仍要补上。
         for clause in re.split(r"[，,、；;]", sentence):
+            # "我在杭州做后端开发，我最喜欢喝拿铁" 的前半句只是背景事实，不是偏好；
+            # 不筛掉会把它当成 preference 落库，污染检索。
+            if not (
+                is_explicit_preference(clause)
+                or memory_noise_filter.is_strong_preference(clause)
+            ):
+                continue
             tokens = [
                 token
                 for token in re.split(
@@ -287,11 +313,48 @@ def _is_transient_llm_error(exc: BaseException) -> bool:
     return status in _TRANSIENT_STATUS_CODES
 
 
-async def _ainvoke_with_retry(llm: ChatOpenAI, messages: list[Any]) -> Any:
+async def _ainvoke_with_retry(
+    llm: ChatOpenAI,
+    messages: list[Any],
+    *,
+    response_format: dict[str, str] | None = None,
+) -> Any:
+    """Call the memory LLM, retrying transient errors.
+
+    `response_format={"type": "json_object"}` 是最强的一道结构约束（模型侧保证输出
+    合法 JSON），但并非所有 OpenAI 兼容端点都支持 —— 被拒时降级为纯文本调用，
+    宁可少一层约束也不能整轮丢事实。
+    """
+    if response_format is None:
+        return await _ainvoke_with_transient_retries(llm, messages)
+    try:
+        return await _ainvoke_with_transient_retries(
+            llm, messages, response_format=response_format
+        )
+    except Exception as exc:
+        if _is_transient_llm_error(exc):
+            raise
+        logger.warning(
+            "Memory LLM rejected response_format=%s (%s); retrying without JSON mode",
+            response_format.get("type"),
+            exc,
+        )
+        return await _ainvoke_with_transient_retries(llm, messages)
+
+
+async def _ainvoke_with_transient_retries(
+    llm: ChatOpenAI,
+    messages: list[Any],
+    *,
+    response_format: dict[str, str] | None = None,
+) -> Any:
+    call_kwargs: dict[str, Any] = (
+        {"response_format": dict(response_format)} if response_format else {}
+    )
     delay = _MEMORY_LLM_BACKOFF_SECONDS
     for attempt in range(_MEMORY_LLM_RETRIES + 1):
         try:
-            return await llm.ainvoke(messages)
+            return await llm.ainvoke(messages, **call_kwargs)
         except Exception as exc:
             if attempt >= _MEMORY_LLM_RETRIES or not _is_transient_llm_error(exc):
                 raise
@@ -413,16 +476,8 @@ def _coerce_uuid(raw: Any) -> uuid.UUID | None:
 
 
 def _parse_decision(raw: str) -> dict[str, Any] | None:
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        lines = [line for line in lines if not line.strip().startswith("```")]
-        cleaned = "\n".join(lines).strip()
-    try:
-        parsed = json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
+    parsed = extract_json_payload(raw)
+    if parsed is None:
         return None
     action = str(parsed.get("action", "")).strip().upper()
     if action not in {"ADD", "UPDATE", "DELETE", "NOOP"}:
@@ -464,7 +519,9 @@ async def _decide_memory_action(
         HumanMessage(content=human),
     ]
     try:
-        response = await _ainvoke_with_retry(llm, messages)
+        response = await _ainvoke_with_retry(
+            llm, messages, response_format=JSON_OBJECT_RESPONSE_FORMAT
+        )
         raw = response.content if isinstance(response.content, str) else "{}"
     except Exception:
         logger.warning("Memory decision LLM call failed; falling back to ADD for %r", new_text[:60])
@@ -502,15 +559,18 @@ async def run_post_chat_memory_extraction(
     ]
 
     try:
-        response = await _ainvoke_with_retry(llm, extraction_messages)
-        raw = response.content if isinstance(response.content, str) else "[]"
+        response = await _ainvoke_with_retry(
+            llm, extraction_messages, response_format=JSON_OBJECT_RESPONSE_FORMAT
+        )
+        raw = response.content if isinstance(response.content, str) else ""
         facts = _extract_json_array(raw)
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Memory extraction returned non-JSON; skipping persist")
-        return
     except Exception:
         logger.exception("Post-chat memory extraction LLM call failed for user %s", user_id)
         return
+
+    if not facts and extract_json_value(raw) is None:
+        # 解析失败不再整轮放弃：下面的显式偏好补抽仍会把最关键的偏好落库。
+        logger.warning("Memory extraction reply is not JSON; raw: %.200s", raw)
 
     # Prompt 只是第一道防线：LLM 会漏掉"我最喜欢喝拿铁"这类显式偏好，
     # 却抽到"更爱美式"，导致新旧偏好只剩一半。这里确定性补齐。

@@ -26,6 +26,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import BaseModel
 
 from agents.graph import build_graph
+from agents.orchestrator_node import (
+    _append_reminder_confirm,
+    _reminder_confirm_from_evidence,
+)
 
 USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000042")
 
@@ -471,6 +475,46 @@ class TimelineIsolationTests(unittest.TestCase):
         self.assertNotIn("绝对不能作为当前执行目标；严禁把昨天的任务重复确认或重复执行。".split("；")[0], "")
         self.assertIn("{context_isolation_rule}", PLANNER_SYSTEM_PROMPT)
         self.assertEqual(_CONTEXT_ISOLATION_RULE, CONTEXT_ISOLATION_RULE)
+
+
+class ReminderConfirmHelperTests(unittest.TestCase):
+    """模型自调 create_reminder 落库后，最终文本若没提提醒，确定性补确认句。"""
+
+    RECEIPT = json.dumps(
+        {
+            "status": "created",
+            "reminder_id": "r-1",
+            "task_id": "t-1",
+            "title": "国家图书馆 专注时段",
+            "remind_at": "2026-11-05T01:30:00+00:00",
+        },
+        ensure_ascii=False,
+    )
+
+    def test_append_when_reply_drifted_away(self) -> None:
+        # 真实 badcase：提醒落库了，回复却跑题成"明天的天气"。
+        text = "北京市明天的天气：晴，气温 17至2°C。"
+        result = _append_reminder_confirm(text, {"create_reminder": self.RECEIPT}, "Asia/Shanghai")
+        self.assertIn("已设置提醒", result)
+        self.assertIn("国家图书馆 专注时段", result)
+
+    def test_skip_when_reply_already_mentions_reminder(self) -> None:
+        text = "已设置提醒：「国家图书馆 专注时段」"
+        result = _append_reminder_confirm(text, {"create_reminder": self.RECEIPT}, "Asia/Shanghai")
+        self.assertEqual(result, text)
+
+    def test_skip_when_no_receipt(self) -> None:
+        text = "好的。"
+        self.assertEqual(_append_reminder_confirm(text, {}, "Asia/Shanghai"), text)
+
+    def test_confirmation_formats_local_time(self) -> None:
+        # remind_at 是 UTC，必须换算成用户本地时区（Asia/Shanghai → +8 小时）。
+        confirm = _reminder_confirm_from_evidence(self.RECEIPT, "Asia/Shanghai")
+        self.assertIn("11-05 09:30", confirm)
+
+    def test_skip_on_failed_receipt(self) -> None:
+        failed = json.dumps({"status": "error", "message": "缺少参数"}, ensure_ascii=False)
+        self.assertIsNone(_reminder_confirm_from_evidence(failed, "Asia/Shanghai"))
 
 
 if __name__ == "__main__":

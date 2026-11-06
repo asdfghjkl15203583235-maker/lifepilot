@@ -24,6 +24,7 @@ from agents.core_intent import ROUTE_DIRECT, ROUTE_LIFE, render_core_intent
 from agents.common import (
     CONTEXT_ISOLATION_RULE,
     looks_like_local_task_management,
+    render_time_reference,
     resolve_local_datetime,
     runtime_value,
     tz_name_of,
@@ -117,7 +118,8 @@ PLANNER_SYSTEM_PROMPT = """\
   ]
 }}
 
-今天的本地日期和时间（用户时区 {tz_name}）：{today}
+【时间基准 — 用户时区 {tz_name}】以下为当前时间与未来日期查表，相对时间一律以此为基准推算，禁止自行猜测：
+{today}
 
 {context_isolation_rule}
 
@@ -495,7 +497,7 @@ async def planner_node(
         parsed = {}
     else:
         tz_name = tz_name_of(settings)
-        today = datetime.now(ZoneInfo(tz_name)).strftime("%A, %B %d, %Y %I:%M %p")
+        today = render_time_reference(tz_name)
         user_rules_block = ""
         if isinstance(db_session, AsyncSession) and isinstance(user_id, uuid.UUID):
             try:

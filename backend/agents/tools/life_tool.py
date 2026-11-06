@@ -113,6 +113,11 @@ class LifeTool:
         self._settings = settings
         self._default_city = (default_city or "").strip() or None
         self._user_id = user_id
+        # 本轮内第一次确定的城市。真实 badcase：用户问"今天的天气 + 找个去处"，
+        # 天气解析出北京、地点查询却回落成配置默认城市上海，同轮两个城市互相打架。
+        # LifeTool 实例按请求创建（life_agent_node / direct_reply 各自 new 一个），
+        # 用它做"本轮会话城市"是安全的作用域。
+        self._turn_city: str | None = None
 
     def tools(self) -> list[StructuredTool]:
         tools = [
@@ -177,18 +182,35 @@ class LifeTool:
             ),
         ]
 
+    def _pin_turn_city(self, city: str | None) -> None:
+        """本轮内第一次确定的城市钉住，供后续同轮工具调用复用（先到先得）。"""
+        text = (city or "").strip()
+        if text and not self._turn_city:
+            self._turn_city = text
+
     async def _weather(self, city: str | None = None, latitude: float | None = None, longitude: float | None = None) -> str:
         if city:
+            self._pin_turn_city(city)
             return str(await get_weather(self._settings, city=city, latitude=latitude, longitude=longitude))
-        if self._default_city and latitude is None and longitude is None:
-            # 没说城市但会话有目的地 → 用会话目的地，别回落到配置里的默认城市。
-            return str(await get_weather(self._settings, city=self._default_city))
-        return str(await get_weather(self._settings, latitude=latitude, longitude=longitude))
+        if latitude is None and longitude is None:
+            # 城市优先级：本轮点名 > 会话目的地 > 本轮已确定城市 > 服务端按坐标/默认城市解析。
+            scoped = self._default_city or self._turn_city
+            if scoped:
+                self._pin_turn_city(scoped)
+                return str(await get_weather(self._settings, city=scoped))
+        payload = await get_weather(self._settings, latitude=latitude, longitude=longitude)
+        # 坐标/默认城市解析出的实际城市也要钉住：同轮的地点查询必须跟天气同城。
+        if isinstance(payload, dict):
+            self._pin_turn_city(payload.get("city"))
+        return str(payload)
 
     def _scope_city(self, city: str | None) -> str | None:
-        """本轮点名的城市优先，其次用会话已确认的目的地。"""
+        """本轮点名的城市 > 会话已确认目的地 > 本轮已确定的城市（如天气解析结果）。"""
         explicit = (city or "").strip()
-        return explicit or self._default_city
+        if explicit:
+            self._pin_turn_city(explicit)
+            return explicit
+        return self._default_city or self._turn_city
 
     async def _map(self, query: str, city: str | None = None) -> str:
         return str(

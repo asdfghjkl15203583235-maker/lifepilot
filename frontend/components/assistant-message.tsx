@@ -5,6 +5,7 @@ import { memo, useEffect, useRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { ReasoningBlock } from "./reasoning-block";
 import { useTypewriter } from "@/hooks/use-typewriter";
 import { normalizeRangeTildes } from "@/lib/markdown-text";
 
@@ -18,6 +19,13 @@ interface AssistantMessageProps {
   onTypingComplete?: (messageId: string) => void;
   /** Voice/TTS turns: show literal text, do not parse markdown. */
   isPlainText?: boolean;
+  /**
+   * Intermediate text captured while the turn was streaming, shown collapsed above
+   * the answer. Kept in memory only — a refresh shows just the final answer.
+   */
+  reasoning?: string;
+  /** Streaming wall-clock time, rendered in the collapsed header. */
+  reasoningDurationMs?: number;
 }
 
 const EXTERNAL_LINK_RE = /^https?:\/\//i;
@@ -68,11 +76,14 @@ export const AssistantMessage = memo(function AssistantMessage({
   shouldAnimate,
   onTypingComplete,
   isPlainText = false,
+  reasoning,
+  reasoningDurationMs,
 }: AssistantMessageProps) {
   const { displayedText, isTyping } = useTypewriter(text, shouldAnimate, messageId);
   const hasNotifiedRef = useRef(false);
   // `17~19℃` 里成对的 `~` 会被当成删除线，把整句划掉；渲染前先换「至」。
   const markdownText = isPlainText ? displayedText : normalizeRangeTildes(displayedText);
+  const hasReasoning = typeof reasoning === "string" && reasoning.trim().length > 0;
 
   useEffect(() => {
     if (!isTyping && shouldAnimate && !hasNotifiedRef.current) {
@@ -86,6 +97,10 @@ export const AssistantMessage = memo(function AssistantMessage({
   return (
     <div className="flex justify-start px-1 sm:px-2">
       <div className="assistant-markdown max-w-[min(90%,40rem)] px-1 py-1 text-left text-[15px] leading-relaxed text-white/95">
+        {hasReasoning ? (
+          <ReasoningBlock content={reasoning} durationMs={reasoningDurationMs} />
+        ) : null}
+
         {isPlainText ? (
           <p className="whitespace-pre-wrap">{displayedText}</p>
         ) : (
@@ -104,7 +119,16 @@ export const AssistantMessage = memo(function AssistantMessage({
  * The bubble that is still receiving SSE tokens. Deliberately NOT memoized:
  * its text changes on every delta, so a memo comparison is pure overhead, and
  * the streaming node must stay mounted while new chunks arrive.
+ *
+ * Renders as the expanded "thinking" panel: until `done` arrives there is no
+ * final answer yet, so this muted, collapsible block is what the user reads.
  */
 export function StreamingAssistantMessage({ text }: { text: string }) {
-  return <AssistantMessage text={text} shouldAnimate={false} />;
+  return (
+    <div className="flex justify-start px-1 sm:px-2">
+      <div className="max-w-[min(90%,40rem)] px-1 py-1 text-left">
+        <ReasoningBlock content={text} isStreaming />
+      </div>
+    </div>
+  );
 }

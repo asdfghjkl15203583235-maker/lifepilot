@@ -2,11 +2,9 @@
 
 import asyncio
 import logging
-from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
-from zoneinfo import ZoneInfo
 
 from langgraph.runtime import Runtime
 
@@ -15,6 +13,7 @@ from agents.common import (
     TASK_STATUS_PARTIAL,
     TASK_STATUS_SUCCESS,
     mark_task_in_progress_if_persisted,
+    render_now_reference,
     result_meta,
     runtime_value,
     step_result_update,
@@ -50,7 +49,7 @@ NOTION_SYSTEM_PROMPT = """\
 如果本轮输入附带"上游步骤…的结果"，那是前置步骤已查到的真实数据，
 请直接基于这些内容继续操作（例如写入页面正文），不要重新搜索或编造。
 {format_instruction}
-今天：{today}
+{today}
 """
 
 MARKDOWN_INSTRUCTION = "请用简洁的 Markdown 格式回复。"
@@ -88,7 +87,7 @@ async def notion_agent_node(
 
     is_voice = state.get("is_voice_request", False)
     settings = runtime_value(state, runtime, "settings")
-    today = datetime.now(ZoneInfo(tz_name_of(settings))).strftime("%A, %B %d, %Y %I:%M %p")
+    today = render_now_reference(tz_name_of(settings))
     fmt = PLAIN_TEXT_INSTRUCTION if is_voice else MARKDOWN_INSTRUCTION
 
     system_text = NOTION_SYSTEM_PROMPT.format(format_instruction=fmt, today=today)

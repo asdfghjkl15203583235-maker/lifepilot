@@ -24,7 +24,10 @@ from agents.common import (
     CONTEXT_ISOLATION_RULE,
     FOLLOWUP_INHERITANCE_RULE,
     HITL_VERBAL_CONFIRM_RULE,
+    CITY_CONSISTENCY_RULE,
+    NO_REPEAT_RULE,
     NUMERIC_RANGE_RULE,
+    ROUTE_ORIGIN_RULE,
     TASK_STATUS_FAILED,
     TASK_STATUS_PARTIAL,
     TASK_STATUS_SUCCESS,
@@ -32,7 +35,8 @@ from agents.common import (
     emotional_comfort_prefix,
     looks_like_local_task_management,
     mark_task_in_progress_if_persisted,
-    render_date_reference,
+    render_now_reference,
+    render_time_reference,
     resolve_local_datetime,
     result_meta,
     runtime_value,
@@ -146,13 +150,6 @@ _MERGE_SYSTEM_PROMPT_TMPL = """\
 """
 
 
-def _get_today_string(tz_name: str = "UTC") -> str:
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    return datetime.now(ZoneInfo(tz_name)).strftime("%A, %B %d, %Y %I:%M %p")
-
-
 def _response_format_instruction(is_voice: bool) -> str:
     return PLAIN_TEXT_VOICE_INSTRUCTION if is_voice else MARKDOWN_INSTRUCTION
 
@@ -219,7 +216,7 @@ async def orchestrate_node(
     """
     messages: list[BaseMessage] = state.get("messages", [])
     settings = runtime_value(state, runtime, "settings")
-    today = _get_today_string(tz_name_of(settings))
+    today = render_now_reference(tz_name_of(settings))
     latest_user_text = _latest_user_text(messages)
 
     core = state.get("core_intent") or build_core_intent_from_messages(messages)
@@ -511,6 +508,48 @@ async def _force_planned_reminder(
     return None
 
 
+def _reminder_confirm_from_evidence(raw: str, tz_name: str) -> str | None:
+    """从 create_reminder 的成功回执里拼一句确定性的确认语。
+
+    真实 badcase：提醒确实落库了，但模型（flash 档）写最终回复时跑题成"明天的天气"，
+    对刚创建的提醒只字未提——用户看到"提醒已设置但回答驴唇不对马嘴"。
+    """
+    payload = _parse_tool_receipt(raw)
+    if not _is_successful_receipt(payload):
+        return None
+    title = str(payload.get("title") or "提醒").strip()
+    local_display = ""
+    remind_at = payload.get("remind_at")
+    if remind_at:
+        try:
+            when = datetime.fromisoformat(str(remind_at))
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=ZoneInfo(tz_name))
+            local_display = when.astimezone(ZoneInfo(tz_name)).strftime("%m-%d %H:%M")
+        except (ValueError, TypeError):
+            local_display = ""
+    time_part = f" @ {local_display}" if local_display else ""
+    return f"已设置提醒：「{title}」{time_part}，到点我会提醒你。"
+
+
+def _append_reminder_confirm(text: str, tool_evidence: dict[str, str], tz_name: str) -> str:
+    """模型已成功调 create_reminder 但回复没提提醒时，确定性补一句确认。"""
+    raw = tool_evidence.get("create_reminder")
+    if not raw:
+        return text
+    payload = _parse_tool_receipt(raw)
+    if not _is_successful_receipt(payload):
+        return text
+    title = str(payload.get("title") or "").strip()
+    if "提醒" in text or (title and title in text):
+        # 模型已经自己提到了提醒，不重复追加。
+        return text
+    confirm = _reminder_confirm_from_evidence(raw, tz_name)
+    if not confirm:
+        return text
+    return f"{text}\n\n{confirm}" if text else confirm
+
+
 def _format_approve_confirmation(action: Any, result: dict[str, Any]) -> str:
     """HITL approve 后的确定性回复：如实汇报执行结果，不渲染内部细节。"""
     try:
@@ -607,7 +646,6 @@ async def direct_reply_node(
 
     is_voice = state.get("is_voice_request", False)
     settings = runtime_value(state, runtime, "settings")
-    today = _get_today_string(tz_name_of(settings))
     fmt = _response_format_instruction(is_voice)
 
     core = state.get("core_intent")
@@ -638,6 +676,9 @@ async def direct_reply_node(
         "地图查询必须传 `city` 限定城市；需要估算两地通行时间时调用 "
         "`get_route_planning`（步行/公交地铁/驾车），不要说自己没有路线规划能力。"
         f"{NUMERIC_RANGE_RULE}"
+        f"{CITY_CONSISTENCY_RULE}"
+        f"{ROUTE_ORIGIN_RULE}"
+        f"{NO_REPEAT_RULE}"
         "【行程/多条安排落库】用户确认一份行程时（\"好的，帮我加上\"\"记到待办\""
         "\"加到日程里\"），调用 `create_tasks` 一次性把每个节点落成独立任务："
         "每个节点给 title 和 ISO-8601 `due_at`（如 {\"title\":\"天安门广场\","
@@ -660,8 +701,7 @@ async def direct_reply_node(
         + facts_block
         + CONTEXT_ISOLATION_RULE
         + f"\n{fmt}\n"
-        + f"今天：{today}\n"
-        + render_date_reference(tz_name_of(settings))
+        + render_time_reference(tz_name_of(settings))
     )
     upstream_context = str(state.get("upstream_context") or "")
     if upstream_context:
@@ -803,6 +843,9 @@ async def direct_reply_node(
             if forced is not None:
                 sep = "\n\n" if text else ""
                 text = f"{text}{sep}{forced['confirm']}"
+        elif "create_reminder" in tool_evidence:
+            # 模型自调工具已落库：若最终文本没提提醒，确定性补确认句，防止跑题。
+            text = _append_reminder_confirm(text, tool_evidence, tz_name_of(settings))
 
         # 时间兜底成功落库也算完成；只有需要提醒却完全没落库才判失败。
         needs_reminder = task.get("due_at") or _has_temporal_clue([HumanMessage(content=intent)])
@@ -843,6 +886,8 @@ async def direct_reply_node(
         )
         if forced is not None:
             text = f"{text}\n\n{forced['confirm']}" if text else forced["confirm"]
+    elif "create_reminder" in tool_evidence:
+        text = _append_reminder_confirm(text, tool_evidence, tz_name_of(settings))
 
     needs_reminder = task.get("due_at") or _has_temporal_clue([HumanMessage(content=intent)])
     unmet = bool(needs_reminder) and "create_reminder" not in tool_evidence

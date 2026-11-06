@@ -14,12 +14,15 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
+from agents.city_dictionary import extract_city_by_dictionary
 from agents.core_intent import (
     DESTINATION_CONFIDENCE_HIGH,
+    DESTINATION_SOURCE_INHERITED,
     build_core_intent,
     city_candidate_of_text,
     city_of_text,
 )
+from agents.destination_resolver import extract_destination_candidate
 from agents.entity_resolution import (
     needs_llm_resolution,
     resolve_core_intent_destination,
@@ -74,10 +77,12 @@ class CoreIntentHistoryPriorTests(unittest.TestCase):
         self.assertLess(core["destination_confidence"], DESTINATION_CONFIDENCE_HIGH)
         self.assertTrue(needs_llm_resolution(core, core["latest_utterance"]))
 
-    def test_high_confidence_city_skips_llm(self) -> None:
+    def test_high_confidence_city_still_goes_llm(self) -> None:
+        # 涉及地点的请求即便正则给了高置信度，也必须经 LLM 复核——
+        # 「查看青岛」会被抽成「看青岛」这类污染，高置信度不代表正确。
         core = build_core_intent([_u("去上海玩两天")])
         self.assertEqual(core["entities"]["destination"], "上海")
-        self.assertFalse(needs_llm_resolution(core, core["latest_utterance"]))
+        self.assertTrue(needs_llm_resolution(core, core["latest_utterance"]))
 
 
 class _RecordingLLM:
@@ -141,6 +146,74 @@ class LifeAgentCityParsingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_city_still_parsed(self) -> None:
         self.assertEqual(await _parse_city("上海明天天气"), "上海")
+
+
+class UnifiedDestinationResolverTests(unittest.TestCase):
+    """统一入口 `extract_destination_candidate` 覆盖三类提取的历史 badcase。"""
+
+    def test_view_prefix_is_not_polluted_into_city(self) -> None:
+        # 「查看青岛」不得被抽成「看青岛」——真实 badcase 直接导致地点查询失败。
+        candidate, confidence = extract_destination_candidate(
+            "查看青岛今天的天气，并找一个适合短时专注的好去处"
+        )
+        self.assertEqual(candidate, "青岛")
+        self.assertGreaterEqual(confidence, DESTINATION_CONFIDENCE_HIGH)
+
+    def test_planner_rewritten_weather_intents(self) -> None:
+        cases = {
+            "查询上海近两天的天气情况": "上海",
+            "根据上海天气制定两天出行计划": "上海",
+            "上海最近一周的天气": "上海",
+        }
+        for text, expected in cases.items():
+            candidate, _ = extract_destination_candidate(text)
+            self.assertEqual(candidate, expected, text)
+
+    def test_travel_near_duration_words(self) -> None:
+        cases = {"北京周末两日游": "北京", "帮我规划上海两日游": "上海"}
+        for text, expected in cases.items():
+            candidate, _ = extract_destination_candidate(text)
+            self.assertEqual(candidate, expected, text)
+
+    def test_time_word_still_not_a_city(self) -> None:
+        candidate, confidence = extract_destination_candidate("周二天气怎么样")
+        self.assertIsNone(candidate)
+        self.assertLess(confidence, DESTINATION_CONFIDENCE_HIGH)
+
+    def test_plain_chat_has_no_destination(self) -> None:
+        candidate, confidence = extract_destination_candidate("你好呀")
+        self.assertIsNone(candidate)
+        self.assertEqual(confidence, 0.0)
+
+
+class CityDictionaryAndCachingTests(unittest.TestCase):
+    """词典识别闲聊地名 + 跨轮指代继承 + 同城缓存跳过 LLM。"""
+
+    def test_dictionary_extracts_casual_city(self) -> None:
+        # 正则认不出「北京挺好的」这种随意提到，词典必须补上。
+        self.assertEqual(extract_city_by_dictionary("北京挺好的，还挺吸引人"), "北京")
+        self.assertIsNone(extract_city_by_dictionary("火星挺好的"))
+
+    def test_followup_inherits_casual_city(self) -> None:
+        core = build_core_intent([
+            _u("北京挺好的，还挺吸引人"),
+            _a("确实，北京值得一去。"),
+            _u("我还挺想去的，你帮我规划一下"),
+        ])
+        self.assertEqual(core["entities"]["destination"], "北京")
+        self.assertEqual(core["destination_source"], DESTINATION_SOURCE_INHERITED)
+        # 明确指代继承 → 跳过 LLM（同城缓存命中）。
+        self.assertFalse(needs_llm_resolution(core, core["latest_utterance"]))
+
+    def test_ambiguous_time_word_still_asks_llm(self) -> None:
+        core = build_core_intent([
+            _u("我要去上海玩"),
+            _a("好的。"),
+            _u("周二天气怎么样"),
+        ])
+        self.assertEqual(core["entities"]["destination"], "上海")
+        # 时间词指代不明确，仍需 LLM 判断继承哪个城市。
+        self.assertTrue(needs_llm_resolution(core, core["latest_utterance"]))
 
 
 if __name__ == "__main__":

@@ -12,11 +12,9 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
-from zoneinfo import ZoneInfo
 
 from langgraph.runtime import Runtime
 
@@ -28,6 +26,7 @@ from agents.common import (
     TASK_STATUS_SUCCESS,
     contains_send_claim,
     mark_task_in_progress_if_persisted,
+    render_now_reference,
     result_meta,
     runtime_value,
     step_result_update,
@@ -94,7 +93,7 @@ EMAIL_SYSTEM_PROMPT = """\
 - 如果工具报错包含 Unsafe Login、授权码、IMAP/SMTP 登录、文件夹打开失败等关键词，
   请原样转述这段错误信息，再给出处理建议（如检查 IMAP/SMTP 服务、更换授权码）
 {format_instruction}
-今天：{today}
+{today}
 """
 
 MARKDOWN_INSTRUCTION = "请用简洁的 Markdown 格式回复。"
@@ -450,7 +449,7 @@ async def email_agent_node(
 
     is_voice = state.get("is_voice_request", False)
     settings = runtime_value(state, runtime, "settings")
-    today = datetime.now(ZoneInfo(tz_name_of(settings))).strftime("%A, %B %d, %Y %I:%M %p")
+    today = render_now_reference(tz_name_of(settings))
     fmt = PLAIN_TEXT_INSTRUCTION if is_voice else MARKDOWN_INSTRUCTION
 
     system_text = EMAIL_SYSTEM_PROMPT.format(format_instruction=fmt, today=today)

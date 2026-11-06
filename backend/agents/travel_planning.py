@@ -16,7 +16,7 @@ import re
 from typing import Any
 
 from agents.common import NUMERIC_RANGE_RULE
-from agents.core_intent import city_candidate_of_text, strip_time_tokens
+from agents.destination_resolver import extract_travel_destination
 
 ROUTE_LIFE = "life"
 ROUTE_SEARCH = "search"
@@ -27,29 +27,9 @@ _TRAVEL_HINT_RE = re.compile(
     r"玩[0-9一二两三四五六七八九十]+[天日]|"
     r"[0-9一二两三四五六七八九十]+[天日]的?(行程|计划|游)"
 )
-# 「去/到 X」里的 X 是目的地候选。
-_TRAVEL_DEST_RE = re.compile(
-    r"(?:去|到|飞往|前往|在)\s*([一-龥]{2,6}?)(?:玩|待|呆|逛|游|旅游|旅行|出差|度假|"
-    r"的|，|,|。|\s|$)"
-)
 _DURATION_RE = re.compile(
     r"([0-9一二两三四五六七八九十]+)\s*[天日]"
 )
-# 「北京周末两日游」「帮我规划上海两日游」这类没有「去/到」的目的地写法：
-# 先剥掉祈使动词，再取紧挨着「周末/两日游/旅游/攻略」的那个词。
-_LEADING_VERB_RE = re.compile(
-    r"^(?:帮我|帮忙|请你|请|麻烦|给我|我要|我想|想要|想|要|"
-    r"规划|计划|安排|制定|做一?个?|来个|来一?个?|一份)+"
-)
-_TRAVEL_DEST_NEAR_RE = re.compile(
-    r"([一-龥]{2,4}?)(?:周末|假期|[0-9一二两三四五六七八九十]+[日天](?:游|行程|计划)?|"
-    r"旅游|旅行|自由行|攻略|行程)"
-)
-# 这些词本身不是地名，防止「周末两日游」被解析成目的地「周末」。
-_DEST_STOPWORDS = {
-    "周末", "假期", "今天", "明天", "后天", "这周", "下周", "一个",
-    "这份", "我的", "两日", "三日", "行程", "旅游", "攻略", "计划",
-}
 
 TRAVEL_STEP_PRIORITY = "medium"
 TRAVEL_STEP_PROJECT = "生活"
@@ -64,35 +44,6 @@ def is_travel_request(text: str) -> bool:
     if not text:
         return False
     return bool(_TRAVEL_HINT_RE.search(text))
-
-
-def extract_travel_destination(
-    text: str,
-    fallback: str | None = None,
-) -> str | None:
-    """从旅行请求里取目的地；取不到就用会话已确认的目的地。"""
-    if fallback and fallback.strip():
-        return fallback.strip()
-    if not text:
-        return None
-    match = _TRAVEL_DEST_RE.search(text)
-    if match:
-        candidate = match.group(1).strip(" 的，,。")
-        if 2 <= len(candidate) <= 6:
-            return candidate
-
-    # 「北京周末两日游」「帮我规划上海两日游」：没有 去/到，城市紧挨着时长词。
-    condensed = _LEADING_VERB_RE.sub("", text).strip()
-    for candidate_text in (condensed, text):
-        near = _TRAVEL_DEST_NEAR_RE.search(candidate_text)
-        if not near:
-            continue
-        candidate = strip_time_tokens(near.group(1)).strip()
-        if 2 <= len(candidate) <= 4 and candidate not in _DEST_STOPWORDS:
-            return candidate
-
-    destination, confidence = city_candidate_of_text(text)
-    return destination
 
 
 def extract_travel_duration(text: str) -> str:

@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 
 import {
   addControllerToScopeSet,
-  clearMapAndAbortAllControllers,
   removeControllerFromScopeSet,
   abortAllControllersInScope,
 } from "@/lib/abort-controller-scope";
@@ -62,7 +61,7 @@ export interface ChatCompletionMessagePayload {
 }
 
 interface CompletionHandlers {
-  onSuccess: (assistantText: string) => void;
+  onSuccess: (assistantText: string, trace?: string) => void;
   onComplete: () => void;
   onError: (message: string) => void;
   /** Fired when this request is aborted (tab closed or workspace unmount). */
@@ -220,7 +219,8 @@ export function useChatCompletion(apiBaseUrl?: string) {
                 handlers.onError("对话接口返回无效响应");
                 return { outcome: "error", lastEventId: cursor };
               }
-              handlers.onSuccess(content);
+              const trace = typeof parsed.trace === "string" ? parsed.trace : undefined;
+              handlers.onSuccess(content, trace);
               handlers.onComplete();
               return { outcome: "done", lastEventId: cursor };
             } else if (type === "cancelled") {
@@ -307,12 +307,10 @@ export function useChatCompletion(apiBaseUrl?: string) {
     [apiBaseUrl, readStream],
   );
 
-  useEffect(
-    () => () => {
-      clearMapAndAbortAllControllers(abortControllersByScopeRef.current);
-    },
-    [],
-  );
+  // 这里刻意不做"卸载即 abort"。切页会卸载整个工作区，若在此中止 SSE，后端
+  // 在 DISCONNECT_CANCEL_GRACE_SECONDS（3 秒）内等不到重连就会取消这一轮，并把
+  // 已生成的内容随事务一起回滚，用户回来只剩自己那条提问。保持连接让服务端跑完
+  // 并落库，回来时由 needsRefresh 补拉。"停止生成"走 cancelConversation，不依赖这里。
 
   return { requestAssistantReply, abortConversation, cancelConversation };
 }

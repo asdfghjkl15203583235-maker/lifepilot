@@ -489,6 +489,17 @@ class DeterministicPreferenceReplacementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["text"] for item in missing], ["我最喜欢喝拿铁"])
         self.assertTrue(all(item["category"] == "preference" for item in missing))
 
+    def test_background_clause_is_not_backfilled_as_preference(self) -> None:
+        """回归："我在杭州做后端开发，我最喜欢喝拿铁" 的后半句不是偏好，不许补进去。"""
+        from services.post_chat_memory_extraction import _missing_explicit_preferences
+
+        payloads = [{"role": "user", "content": "我在杭州做后端开发，我最喜欢喝拿铁。"}]
+        missing = _missing_explicit_preferences(
+            [{"text": "用户最喜欢喝拿铁", "category": "preference"}],
+            payloads,
+        )
+        self.assertEqual(missing, [])
+
     def test_fully_covered_preference_is_not_duplicated(self) -> None:
         from services.post_chat_memory_extraction import _missing_explicit_preferences
 
@@ -539,6 +550,137 @@ class AddMemoryExactDedupTests(unittest.IsolatedAsyncioTestCase):
         mock_find.assert_awaited_once()
         mock_embed.assert_not_awaited()
         session.add.assert_not_called()
+
+
+class MemoryExtractionJsonModeTests(unittest.IsolatedAsyncioTestCase):
+    """抽取必须走 json_object 强约束 + 解析容错，否则一次纯文本回复就整轮记忆丢失。"""
+
+    def _make_settings(self) -> MagicMock:
+        settings = MagicMock()
+        settings.database_url = "postgresql://x"
+        settings.voyageai_api_key = "k"
+        settings.voyageai_model = "voyage-3"
+        return settings
+
+    async def _run_extraction(self, llm: MagicMock, user_message: str = "我喜欢喝美式") -> MagicMock:
+        session = AsyncMock(spec=AsyncSession)
+        with patch(
+            "services.post_chat_memory_extraction.add_memory_tool",
+            new=AsyncMock(),
+        ) as mock_add, patch(
+            "services.post_chat_memory_extraction.find_similar_memories",
+            new=AsyncMock(return_value=[]),
+        ):
+            await run_post_chat_memory_extraction(
+                session,
+                self._make_settings(),
+                uuid.uuid4(),
+                [{"role": "user", "content": user_message}],
+                "好的。",
+                extraction_llm=llm,
+            )
+        return mock_add
+
+    def test_prompt_demands_pure_json_without_fences(self) -> None:
+        prompt = MEMORY_EXTRACTION_SYSTEM_PROMPT
+        # DeepSeek 的 json_object 模式要求 prompt 里出现 "json" 这个词。
+        self.assertIn("json", prompt.lower())
+        self.assertIn("仅输出合法的 json 字符串", prompt)
+        self.assertIn("严禁使用 ```json 等 Markdown 代码块包裹", prompt)
+        self.assertIn('"facts"', prompt)
+
+    def test_extract_json_array_tolerates_prose_and_object_wrapper(self) -> None:
+        raw = '好的，我整理如下：\n{"facts": [{"text": "用户喜欢喝美式", "category": "preference"}]}\n希望有帮助。'
+        self.assertEqual(
+            _extract_json_array(raw),
+            [{"text": "用户喜欢喝美式", "category": "preference"}],
+        )
+
+    def test_extract_json_array_tolerates_fences_and_bare_array(self) -> None:
+        raw = '```json\n[{"text": "用户在杭州工作", "category": "fact"}]\n```'
+        self.assertEqual(
+            _extract_json_array(raw),
+            [{"text": "用户在杭州工作", "category": "fact"}],
+        )
+
+    def test_extract_json_array_returns_empty_on_pure_prose(self) -> None:
+        self.assertEqual(_extract_json_array("抱歉，我不确定该记住什么。"), [])
+
+    def test_extract_json_array_repairs_minor_syntax_errors(self) -> None:
+        try:
+            import json_repair  # noqa: F401
+        except ImportError:
+            self.skipTest("json_repair 未安装")
+        raw = "{'facts': [{'text': '用户喜欢喝拿铁', 'category': 'preference'},]}"
+        self.assertEqual(
+            _extract_json_array(raw),
+            [{"text": "用户喜欢喝拿铁", "category": "preference"}],
+        )
+
+    def test_parse_decision_tolerates_fences_and_prose(self) -> None:
+        from services.post_chat_memory_extraction import _parse_decision
+
+        raw = '我的判断是：\n```json\n{"action": "ADD", "target_memory_id": null}\n```'
+        self.assertEqual(_parse_decision(raw), {"action": "ADD", "target_memory_id": None})
+
+    async def test_extraction_call_forces_json_object_response_format(self) -> None:
+        llm = MagicMock()
+        llm.ainvoke = AsyncMock(
+            return_value=MagicMock(
+                content=json.dumps({"facts": [{"text": "用户喜欢喝美式", "category": "preference"}]}),
+            ),
+        )
+
+        mock_add = await self._run_extraction(llm)
+
+        self.assertEqual(
+            llm.ainvoke.call_args.kwargs["response_format"],
+            {"type": "json_object"},
+        )
+        mock_add.assert_awaited_once()
+
+    async def test_non_json_reply_still_persists_explicit_preference(self) -> None:
+        """LLM 完全不给 JSON 时也不许整轮放弃：显式偏好必须补抽落库。"""
+        llm = MagicMock()
+        llm.ainvoke = AsyncMock(
+            return_value=MagicMock(content="抱歉，这次我无法输出 JSON。"),
+        )
+
+        mock_add = await self._run_extraction(llm, user_message="我最喜欢喝拿铁。")
+
+        mock_add.assert_awaited_once()
+        self.assertEqual(mock_add.call_args.args[3], "我最喜欢喝拿铁")
+        self.assertEqual(mock_add.call_args.args[4], "preference")
+
+    async def test_valid_empty_facts_reply_is_not_reported_as_error(self) -> None:
+        """回复「这次没什么可记的」是正常结果，控制台不许报错。"""
+        llm = MagicMock()
+        llm.ainvoke = AsyncMock(return_value=MagicMock(content='{"facts": []}'))
+
+        with self.assertNoLogs("services.post_chat_memory_extraction", level="WARNING"):
+            mock_add = await self._run_extraction(llm, user_message="今天天气不错")
+
+        mock_add.assert_not_awaited()
+
+    async def test_json_mode_rejected_by_provider_falls_back_to_plain_call(self) -> None:
+        """provider 不支持 json_object 时降级为普通调用，而不是丢事实。"""
+
+        class UnsupportedResponseFormat(Exception):
+            status_code = 400
+
+        llm = MagicMock()
+        llm.ainvoke = AsyncMock(
+            side_effect=[
+                UnsupportedResponseFormat("response_format type is unavailable now"),
+                MagicMock(content=json.dumps({"facts": [{"text": "用户在杭州工作", "category": "fact"}]})),
+            ],
+        )
+
+        mock_add = await self._run_extraction(llm, user_message="我在杭州工作")
+
+        self.assertEqual(llm.ainvoke.await_count, 2)
+        self.assertNotIn("response_format", llm.ainvoke.call_args.kwargs)
+        mock_add.assert_awaited_once()
 
 
 if __name__ == "__main__":

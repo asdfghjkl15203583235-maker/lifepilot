@@ -11,7 +11,6 @@ import { ChatComposer } from "./chat-composer";
 import { ConversationSidebar, type ConversationSidebarItem } from "./conversation-sidebar";
 import { WorkspaceShell } from "./workspace-shell";
 import { useAuth } from "@/hooks/use-auth";
-import { useCalendarIntegration } from "@/hooks/use-calendar-integration";
 import { useChatCompletion, type ChatCompletionMessagePayload } from "@/hooks/use-chat-completion";
 import {
   useConversations,
@@ -86,9 +85,12 @@ const CHAT_ENTER_ANIMATION_CLEAR_MS = CHAT_TAB_ENTER_DURATION_MS + CHAT_ENTER_AN
  * How long to keep asking the backend for a transcript that is still being
  * generated after the client dropped the stream. The turn keeps running
  * server-side, so the full reply lands within a few seconds normally.
+ *
+ * 60 秒而不是 25 秒：切页不再中止生成后，用户回来时这一轮很可能还在跑
+ * （多分支对话实测十几到几十秒），等太短会在答案落库前就放弃补拉。
  */
 const CONVERSATION_SYNC_POLL_MS = 1500;
-const CONVERSATION_SYNC_DEADLINE_MS = 25000;
+const CONVERSATION_SYNC_DEADLINE_MS = 60000;
 
 function decrementInFlightCount(
   previous: Record<string, number>,
@@ -241,6 +243,13 @@ interface ChatMessage {
   isPlainText?: boolean;
   /** HITL confirmation drafts attached to this assistant message (confirm cards). */
   pendingActions?: PendingActionRecord[];
+  /**
+   * 这一轮流式阶段产生的中间文本，折叠显示在正文上方。
+   * 只活在内存里：既不发后端，也不进 localStorage，刷新后自然消失。
+   */
+  reasoning?: string;
+  /** 该轮从发出请求到拿到最终答案的耗时，用于折叠块标题。 */
+  reasoningDurationMs?: number;
 }
 
 const TAB_ICON_ACCENT_CLASSES = [
@@ -427,7 +436,6 @@ export function GlassWorkspace() {
   const { sendVoiceMessage, abortVoiceConversation: abortVoiceForConversation } = useVoiceChat();
   const { unreadCount: topBarNotificationCount } = useNotificationUnreadCount();
   const { status: mail163Status, connectMail163, disconnectMail163 } = useMail163Login();
-  const { status: calendarStatus, connectCalendar, disconnectCalendar } = useCalendarIntegration();
   const { status: notionStatus, connectNotion, disconnectNotion } = useNotionIntegration();
 
   /** After a chat/voice turn the backend may create or mutate tasks, reminders and
@@ -476,6 +484,8 @@ export function GlassWorkspace() {
 
   /** Live-mirrors messagesByConversationId so the debounced saver never reads stale closures. */
   const messagesByConversationIdRef = useRef<Record<string, ChatMessage[]>>({});
+  /** 每轮请求的开始时间（毫秒），用于折叠块显示"用时 N 秒"。 */
+  const replyStartedAtRef = useRef<Record<string, number>>({});
   /** Live-mirrors streamingByConversationId so `onSuccess` can tell whether the
    *  turn was already rendered token-by-token (and must not be replayed). */
   const streamingByConversationIdRef = useRef<Record<string, string>>({});
@@ -491,6 +501,12 @@ export function GlassWorkspace() {
   const repliesInFlightRef = useRef<Record<string, number>>({});
   /** Cancels a server-side transcript poll when the workspace unmounts. */
   const conversationSyncCancelledRef = useRef(false);
+  /**
+   * 工作区一旦卸载，本地就再也追不上这一轮的最新内容（setState 是空操作，
+   * ref 不再更新）。此时必须禁止任何 PATCH，否则会用"只有用户提问"的旧
+   * transcript 覆盖服务端刚写完的完整回答。
+   */
+  const isWorkspaceUnmountedRef = useRef(false);
 
   useEffect(() => {
     messagesByConversationIdRef.current = messagesByConversationId;
@@ -579,29 +595,41 @@ export function GlassWorkspace() {
   const saveConversationNowRef = useRef<(conversationId: string) => void>(() => {});
 
   useEffect(() => {
+    // React 18 开发模式会 mount → cleanup → mount，而 ref 是同一个对象：若不在
+    // effect 重新进入时复位，第一次模拟卸载就会把"已卸载"永久置为 true，之后
+    // 所有会话保存都被拦截 —— 表现就是关掉 Tab 后会话连历史一起消失。
+    isWorkspaceUnmountedRef.current = false;
+    conversationSyncCancelledRef.current = false;
+
     return () => {
       conversationSyncCancelledRef.current = true;
       if (enterAnimationClearTimeoutRef.current !== null) {
         clearTimeout(enterAnimationClearTimeoutRef.current);
       }
-      // 卸载时必须**先冲刷**再清定时器：切页会卸载整个工作区，直接丢弃
-      // 待写队列就等于丢掉刚生成的那条回复。
-      //
-      // 但"仍在生成中"的会话绝不能冲刷：本地只有半截回复，PATCH 上去会把
-      // 服务端正在生成的完整对话截断。这类会话打上待刷新标记，回来时从
-      // 服务端重新拉取（后端已把断线的那一轮完整落库）。
-      for (const conversationId of persistDebounceTimeoutRef.current.keys()) {
-        const inFlight = saveConversationNowRef.current;
+      // 生成中的会话要从 repliesInFlight 里找，不能只看待写队列：生成期间
+      // 根本不存在待写定时器（它只在某一轮结束时才排），只遍历队列会把正在
+      // 生成的那一轮整个漏掉，于是切页回来只剩用户自己那条消息。
+      for (const conversationId of Object.keys(repliesInFlightRef.current)) {
         if ((repliesInFlightRef.current[conversationId] ?? 0) > 0) {
           markConversationNeedsRefresh(conversationId);
+        }
+      }
+      // 其余会话照旧冲刷待写队列：切页会卸载整个工作区，丢掉队列就等于丢掉
+      // 刚生成的那条回复。生成中的会话不能冲刷——本地只有半截回复，PATCH
+      // 上去会把服务端正在生成的完整对话截断。
+      for (const conversationId of persistDebounceTimeoutRef.current.keys()) {
+        if ((repliesInFlightRef.current[conversationId] ?? 0) > 0) {
           continue;
         }
-        inFlight(conversationId);
+        saveConversationNowRef.current(conversationId);
       }
       for (const timer of persistDebounceTimeoutRef.current.values()) {
         clearTimeout(timer);
       }
       persistDebounceTimeoutRef.current.clear();
+      // 放在最后：上面的收尾写入必须放行，而卸载之后流仍然会回调
+      // onSuccess/onComplete，那时的 PATCH 一律拒绝。
+      isWorkspaceUnmountedRef.current = true;
     };
   }, []);
 
@@ -1071,6 +1099,12 @@ export function GlassWorkspace() {
    */
   const saveConversationNow = useCallback(
     (conversationId: string) => {
+      // 卸载后仍在跑的流会照常回调 onSuccess/onComplete，但本地 ref 不会再更新
+      // （setState 是空操作）。继续 PATCH 只会用旧的 transcript 覆盖服务端刚写完
+      // 的完整回答，所以这里直接放弃，交给下次进入时的补拉。
+      if (isWorkspaceUnmountedRef.current) {
+        return;
+      }
       const messages = messagesByConversationIdRef.current[conversationId] ?? [];
       if (messages.length === 0) {
         return;
@@ -1226,7 +1260,11 @@ export function GlassWorkspace() {
             buildChatMessagesFromPayload(conversation.messages),
             conversation.pending_actions,
           );
-          if (restored.length > baselineCount) {
+          // 必须"最后一条是 assistant"才算拿到结果：切回来时这一轮可能仍在
+          // 生成，服务端此刻只有用户的提问。只看条数会把这种中间态当成完成，
+          // 清掉标记后就再也不补拉，界面停在"只有我的问题"。
+          const lastMessage = restored[restored.length - 1];
+          if (restored.length > baselineCount && lastMessage?.role === "assistant") {
             setMessagesByConversationId((previous) => ({
               ...previous,
               [conversationId]: restored,
@@ -1310,6 +1348,8 @@ export function GlassWorkspace() {
           timestamp: message.createdAt,
         }));
 
+      replyStartedAtRef.current[conversationId] = Date.now();
+
       setRepliesInFlight((previous) => ({
         ...previous,
         [conversationId]: (previous[conversationId] ?? 0) + 1,
@@ -1342,7 +1382,7 @@ export function GlassWorkspace() {
               action,
             );
           },
-          onSuccess: (assistantText) => {
+          onSuccess: (assistantText, trace) => {
             const assistantMessageId =
               typeof crypto !== "undefined" && "randomUUID" in crypto
                 ? crypto.randomUUID()
@@ -1351,10 +1391,25 @@ export function GlassWorkspace() {
             const drafts = dedupePendingActions(pendingActionsForTurnRef.current);
             pendingActionsForTurnRef.current = [];
 
+            const streamedText = (streamingByConversationIdRef.current[conversationId] ?? "").trim();
+            const startedAt = replyStartedAtRef.current[conversationId];
+            delete replyStartedAtRef.current[conversationId];
+            const reasoningDurationMs =
+              startedAt === undefined ? undefined : Math.max(0, Date.now() - startedAt);
+            // 优先用后端确定性产生的"执行轨迹"作为可折叠思考过程；
+            // 最终答案本身就包含那段流式文本时（单分支的 merge 只是追加了脚注），
+            // 折叠块会是正文的重复，这时干脆不展示。
+            const reasoning =
+              (typeof trace === "string" && trace.trim().length > 0
+                ? trace
+                : streamedText.length > 0 && !assistantText.includes(streamedText)
+                  ? streamedText
+                  : undefined);
+
             // 这一轮是否已经在流式气泡里逐字显示过？是的话就不能再挂给打字机，
             // 否则 done 事件到达时流式气泡被卸载、新消息从第 0 个字符重新播放，
             // 用户看到的就是"说完之后清空重说一遍"。
-            const alreadyStreamed = (streamingByConversationIdRef.current[conversationId] ?? "").length > 0;
+            const alreadyStreamed = streamedText.length > 0;
 
             setStreamingByConversationId((previous) => removeKey(previous, conversationId));
             if (!alreadyStreamed) {
@@ -1371,6 +1426,8 @@ export function GlassWorkspace() {
                   text: assistantText,
                   createdAt: new Date().toISOString(),
                   pendingActions: drafts.length > 0 ? drafts : undefined,
+                  reasoning,
+                  reasoningDurationMs: reasoning === undefined ? undefined : reasoningDurationMs,
                 },
               ],
             }));
@@ -1427,6 +1484,7 @@ export function GlassWorkspace() {
     const conversationId = activeConversationId;
     const partialText = streamingByConversationIdRef.current[conversationId] ?? "";
 
+    delete replyStartedAtRef.current[conversationId];
     interruptReply(conversationId);
 
     if (!partialText.trim()) {
@@ -2036,6 +2094,8 @@ export function GlassWorkspace() {
                         shouldAnimate={animatingMessageIds.has(message.id)}
                         onTypingComplete={handleTypingComplete}
                         isPlainText={message.isPlainText === true}
+                        reasoning={message.reasoning}
+                        reasoningDurationMs={message.reasoningDurationMs}
                       />
                       {(message.pendingActions ?? []).map((action) => (
                         <PendingActionCard
@@ -2135,14 +2195,11 @@ export function GlassWorkspace() {
                 onVoiceMessageSend={handleSendVoiceMessage}
                 onConnectMail163={connectMail163}
                 onConnectNotion={connectNotion}
-                onConnectCalendar={connectCalendar}
                 onDisconnectMail163={disconnectMail163}
                 onDisconnectNotion={disconnectNotion}
-                onDisconnectCalendar={disconnectCalendar}
                 integrationStatus={{
                   isMail163Connected: mail163Status.isConnected,
                   isNotionConnected: notionStatus.isConnected,
-                  isCalendarConnected: calendarStatus.isConnected,
                 }}
               />
             </div>

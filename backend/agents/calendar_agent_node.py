@@ -10,12 +10,10 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
-from zoneinfo import ZoneInfo
 
 from langgraph.runtime import Runtime
 
@@ -24,6 +22,7 @@ from agents.common import (
     TASK_STATUS_PARTIAL,
     TASK_STATUS_SUCCESS,
     mark_task_in_progress_if_persisted,
+    render_time_reference,
     result_meta,
     runtime_value,
     step_result_update,
@@ -59,7 +58,8 @@ Google 账号或外部授权**；绝不要说"日历未连接""需要先授权 G
   请直接基于这些内容安排日程，不要重新查询或编造
 - 始终以清晰、友好、易于阅读的方式呈现结果
 {format_instruction}
-今天：{today}（用户时区 {tz_name}）
+【时间基准 — 用户时区 {tz_name}】：
+{today}
 """
 
 MARKDOWN_INSTRUCTION = "请用简洁的 Markdown 格式回复。"
@@ -98,7 +98,7 @@ async def calendar_agent_node(
         }
 
     is_voice = state.get("is_voice_request", False)
-    today = datetime.now(ZoneInfo(tz_name)).strftime("%A, %B %d, %Y %I:%M %p")
+    today = render_time_reference(tz_name)
     fmt = PLAIN_TEXT_INSTRUCTION if is_voice else MARKDOWN_INSTRUCTION
 
     system_text = CALENDAR_SYSTEM_PROMPT.format(

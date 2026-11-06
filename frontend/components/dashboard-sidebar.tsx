@@ -20,8 +20,6 @@ const STATUS_STYLE: Record<string, { label: string; className: string }> = {
   done: { label: "已完成", className: "bg-emerald-500/15 text-emerald-200" },
 };
 
-const PRIORITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, urgent: 3 };
-
 function IconGiftTag({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -95,6 +93,14 @@ function hasValidDueTime(dueAt: string | null): boolean {
   if (!dueAt) return false;
   const due = new Date(dueAt);
   return !Number.isNaN(due.getTime());
+}
+
+/** 按「距离截止日期远近」排序：最近的在前，无截止日期的排最后。 */
+function compareByDueDate(aDueAt: string | null, bDueAt: string | null): number {
+  const aDue = hasValidDueTime(aDueAt) ? new Date(aDueAt!).getTime() : Number.POSITIVE_INFINITY;
+  const bDue = hasValidDueTime(bDueAt) ? new Date(bDueAt!).getTime() : Number.POSITIVE_INFINITY;
+  if (aDue === bDue) return 0;
+  return aDue - bDue;
 }
 
 function resolveActivityAction(dueAt: string | null, reason: string): string {
@@ -205,7 +211,8 @@ export function DashboardSidebar({ isAgentTracesOpen, onAgentTracesToggle }: Das
     // 已完成的条目绝不能再出现在"待办"里：否则勾选完成后它会留在原位，
     // 用户以为没生效。
     .filter(({ item }) => item.status !== "done")
-    .sort((a, b) => PRIORITY_RANK[b.item.priority] - PRIORITY_RANK[a.item.priority]);
+    // 按截止日期远近排序（最近在前，无截止日期最后），而不是按优先级混排。
+    .sort((a, b) => compareByDueDate(a.item.due_at, b.item.due_at));
 
   const visibleActivities =
     prioritized.length > 0
@@ -221,6 +228,7 @@ export function DashboardSidebar({ isAgentTracesOpen, onAgentTracesToggle }: Das
         }))
       : userTasks
           .filter((task) => task.status !== "done")
+          .sort((a, b) => compareByDueDate(a.due_at, b.due_at))
           .map((task) => ({
             key: task.id,
             subject: task.title,

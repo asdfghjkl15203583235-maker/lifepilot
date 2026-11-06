@@ -24,7 +24,6 @@ from routers.conversations import conversations_router
 from routers.voice import voice_router
 from routers.create_entities import create_entities_router
 from routers.dashboard import dashboard_router
-from routers.gmail import gmail_router
 from routers.health import health_router
 from routers.life_preferences import preferences_router
 from routers.life_services import life_services_router
@@ -270,7 +269,6 @@ def create_app() -> FastAPI:
     application.include_router(voice_router)
     application.include_router(conversations_router)
     application.include_router(create_entities_router)
-    application.include_router(gmail_router)
     application.include_router(mail163_router)
     application.include_router(calendar_router)
     application.include_router(notion_router)

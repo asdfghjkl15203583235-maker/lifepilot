@@ -12,19 +12,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from langgraph.runtime import Runtime
 
 from agents.common import (
+    CITY_CONSISTENCY_RULE,
+    NO_REPEAT_RULE,
     NUMERIC_RANGE_RULE,
+    ROUTE_ORIGIN_RULE,
     TASK_STATUS_FAILED,
     TASK_STATUS_PARTIAL,
     TASK_STATUS_SUCCESS,
     mark_task_in_progress_if_persisted,
-    render_date_reference,
+    render_time_reference,
     result_meta,
     runtime_value,
     step_result_update,
     task_status_meta,
     tz_name_of,
 )
-from agents.core_intent import strip_time_tokens
+from agents.destination_resolver import extract_weather_city, mentions_place
 from agents.state import AgentState
 from agents.stream_collector import astream_invoke
 from agents.tools.life_tool import LifeTool
@@ -169,28 +172,6 @@ def _weather_answer(
     return core
 
 
-# 城市名只可能出现在「天气」前面的那一小段里。旧实现把整句去掉标点后当城市，
-# 「帮我查一下上海的天气，并帮我制定出行计划，两天」→「上海并制定出行计划两天」，
-# 高德解析失败后静默回落到默认城市，于是用户问上海却收到广东的天气。
-_CITY_MAX_CHARS = 8
-_CITY_CLAUSE_SPLIT_RE = re.compile(r"[，,。.；;！!？?、\s]")
-_LEADING_FILLER_RE = re.compile(
-    r"^(?:麻烦|请问|请|帮我|帮忙|给我|你能|你可以|能|可以|"
-    r"查一下|查下|查询|查看|查|看一下|看看|看|了解一下|了解|"
-    r"告诉我|想知道|问一下|问|在|的|和|跟|"
-    # 规划器会把 intent 改写成「根据上海天气…」「结合上海天气…」这类句式。
-    r"根据|结合|按照|参考|基于)+"
-)
-_TRAILING_TIME_RE = re.compile(
-    r"(?:今天|明天|后天|大后天|现在|当前|目前|本地|最近|未来|这几天|"
-    r"近[几两三五]?[天日周个星期]|"
-    r"一[周个星期]|两[天日]|三[天日]|[0-9一二三四五六七八九十]+[天日周])+$"
-)
-_LEADING_TIME_RE = re.compile(
-    r"^(?:今天|明天|后天|大后天|现在|当前|目前|最近|未来|这几天)+"
-)
-
-
 def _mentions_place(intent: str) -> bool:
     """用户有没有在「天气」前面点名过地点（哪怕解析不出来）。
 
@@ -198,28 +179,7 @@ def _mentions_place(intent: str) -> bool:
       - "天气怎么样"（没提地点）→ 用默认城市合理；
       - "火星天气"（点了名但解析失败）→ 必须失败，绝不能拿默认城市顶替。
     """
-    if not intent:
-        return False
-    lowered = intent.lower()
-    if "weather" in lowered:
-        rest = lowered.split("weather", 1)[1]
-        rest = rest.replace("in", " ").replace("for", " ").replace("at", " ")
-        return bool(rest.strip(" ?.!。，"))
-    index = intent.find("天气")
-    if index <= 0:
-        return False
-    head = _CITY_CLAUSE_SPLIT_RE.split(intent[:index])[-1]
-    for _ in range(3):
-        before = head
-        head = head.strip().rstrip("的")
-        head = _LEADING_TIME_RE.sub("", head)
-        head = _LEADING_FILLER_RE.sub("", head)
-        head = _TRAILING_TIME_RE.sub("", head)
-        if head == before:
-            break
-    # 「周二天气怎么样」里的「周二」是时间不是地点，剥掉后没有地名才算没提地点。
-    head = strip_time_tokens(head)
-    return bool(head.strip().strip("的"))
+    return mentions_place(intent)
 
 
 def _session_destination(state: AgentState) -> str | None:
@@ -237,33 +197,7 @@ def _session_destination(state: AgentState) -> str | None:
 
 async def _parse_city(intent: str) -> str | None:
     """Extract a city name from a weather intent such as "北京天气怎么样"."""
-    if not intent:
-        return None
-    lowered = intent.lower()
-    for prefix in ("weather in ", "weather for ", "weather at ", "weather"):
-        if lowered.startswith(prefix):
-            return intent[len(prefix):].strip().strip("?.!。，").strip() or None
-    index = intent.find("天气")
-    if index <= 0:
-        return None
-    # 只取「天气」前面最后一个分句，再剥掉动词/时间状语，避免把整句当城市。
-    head = _CITY_CLAUSE_SPLIT_RE.split(intent[:index])[-1]
-    # 动词与时间状语会交替出现（"帮我查一下明天上海的天气"），剥到稳定为止。
-    for _ in range(3):
-        before = head
-        head = head.strip().rstrip("的")
-        head = _LEADING_TIME_RE.sub("", head)
-        head = _LEADING_FILLER_RE.sub("", head)
-        head = _TRAILING_TIME_RE.sub("", head)
-        if head == before:
-            break
-    head = head.strip().rstrip("的")
-    # 「周二」「下周三」是时间词，绝不能当成城市名去查（否则高德会静默回落
-    # 到默认城市，用户看到的是别处的天气）。剥掉时间词后为空即视为未提地点。
-    head = strip_time_tokens(head)
-    if 1 <= len(head) <= _CITY_MAX_CHARS:
-        return head
-    return None
+    return extract_weather_city(intent)
 
 
 async def life_agent_node(
@@ -397,6 +331,9 @@ async def life_agent_node(
         "若 `forecasts` 中没有那一天，必须如实说明「暂无该日预报」，"
         "**严禁**把当前实时实况说成那一天的预报。"
         f"{NUMERIC_RANGE_RULE}"
+        f"{CITY_CONSISTENCY_RULE}"
+        f"{ROUTE_ORIGIN_RULE}"
+        f"{NO_REPEAT_RULE}"
     )
     if session_destination:
         # 跨轮追问只给了地名、没给城市：明确告知模型城市范围，别自己去猜。
@@ -404,7 +341,7 @@ async def life_agent_node(
             f"\n【会话已确认城市】用户此前提过地点是「{session_destination}」。"
             f"查询地名时一律限定在{session_destination}，不要按同名地点到其他城市查找。"
         )
-    system_text += f"\n{render_date_reference(tz_name_of(settings))}"
+    system_text += f"\n{render_time_reference(tz_name_of(settings))}"
     upstream_context = str(state.get("upstream_context") or "")
     if upstream_context:
         system_text = f"{system_text}\n{upstream_context}\n"

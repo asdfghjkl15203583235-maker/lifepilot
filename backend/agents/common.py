@@ -47,6 +47,35 @@ NUMERIC_RANGE_RULE = (
     "渲染成删除线，整句会被划掉。"
 )
 
+# 同一轮多个生活服务工具必须同城。真实 badcase：用户问"今天的天气 + 找个去处"，
+# 天气解析出北京、地点查询却回落到配置默认城市上海，回复里两个城市互相打架，
+# 模型只好把内心纠结原样念给用户听。
+CITY_CONSISTENCY_RULE = (
+    "【城市一致性 — 同一轮硬规则】同一轮里的天气、地点、路线工具必须使用**同一个**城市："
+    "优先用户本轮点名的城市，其次会话已确认的城市；配置里的默认城市只是毫无线索时的"
+    "最后兜底，**严禁**把它当成用户的实际所在城市。"
+    "如果某次工具返回的结果城市与用户所在城市不符，必须按正确城市重新查询，"
+    "而不是把错误结果原样罗列给用户。"
+    "【不要暴露内部决策】回复里严禁出现「这个分支」「推荐工具」「没有采用」「返回的是」"
+    "这类内部执行叙述；工具之间结果冲突时自己解决，只给用户结论与建议。"
+)
+
+# 追问"算路程"时必须有真实起点，且目的地必须是上一轮推荐的那个地点。
+# 真实 badcase：助手问"需要我算到门口的路程吗"，用户回"需要"，模型却给出
+# 榆次老城东门→榆次站的无关路线，既没问起点、也没用上一轮推荐的图书馆/自习室。
+ROUTE_ORIGIN_RULE = (
+    "【算路程必须有起点】调用 get_route_planning 前必须知道起点；用户没给出发位置时，"
+    "必须先反问「你从哪儿出发」（或请用户授权定位），严禁拿无关地点凑一条路线。"
+    "上一轮推荐过的具体地点（图书馆/自习室等）就是本轮要算路程的目的地，"
+    "不得换成别的景点或车站。"
+)
+
+# 追问只答最新问题，不把上一轮交付过的完整信息再播报一遍。
+NO_REPEAT_RULE = (
+    "【不要重复已交付信息】用户追问时只回答最新问题，不要重复播报上一轮已经给过的"
+    "天气、推荐列表等完整内容；确有需要时只补一句最关键的变化。"
+)
+
 # 发送/回复"成功声称"词。HITL 架构下草案阶段绝无 sent/replied 回执，
 # 因此这类声称在 agent 节点内永远是幻觉，必须机械拦截。
 SEND_CLAIM_MARKERS = (
@@ -121,6 +150,60 @@ def tz_name_of(settings: Any) -> str:
 
 
 _CN_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+_CN_FULL_WEEKDAYS = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
+
+# 时间锚点死命令 —— 随【当前时间】一起注入所有 agent，严禁模型自己猜日期/星期。
+TIME_ANCHOR_RULE = (
+    "【时间基准 — 硬性规则】你必须严格以【当前时间】为基准推算所有相对日期"
+    "（今天/明天/后天/周几/下周X）。当用户询问“今天”时，只能基于今天作答；"
+    "若当前条件不满足（例如今天已过、无当日数据），必须明确告知用户，"
+    "并询问是否改期，严禁擅自将回答推演至未来日期。"
+)
+
+
+def _local_now(tz_name: str, now: datetime | None = None) -> datetime:
+    if now is not None:
+        return now
+    try:
+        tz = ZoneInfo(tz_name)
+    except (KeyError, ValueError):
+        tz = ZoneInfo("UTC")
+    return datetime.now(tz)
+
+
+def render_now_reference(tz_name: str = "UTC", *, now: datetime | None = None) -> str:
+    """当前精确时间锚点：【当前时间】：YYYY-MM-DD HH:MM，星期X。
+
+    所有 agent 的 System Prompt 开头都注入这一行，相对时间一律以它为基准，
+    禁止模型从训练数据里猜"今天是哪天/周几"。
+    """
+    current = _local_now(tz_name, now)
+    return (
+        f"【当前时间】：{current.strftime('%Y-%m-%d %H:%M')}，"
+        f"{_CN_FULL_WEEKDAYS[current.weekday()]}"
+    )
+
+
+def render_upcoming_days(tz_name: str = "UTC", *, days: int = 7, now: datetime | None = None) -> str:
+    """未来 N 天的「月-日 星期X」查表，供"明天/周六/下周一"直接查表换算。"""
+    current = _local_now(tz_name, now)
+    upcoming = [
+        f"{(current + timedelta(days=offset)).strftime('%m-%d')}"
+        f" {_CN_FULL_WEEKDAYS[(current + timedelta(days=offset)).weekday()]}"
+        for offset in range(1, max(1, days) + 1)
+    ]
+    return "未来 " + str(max(1, days)) + " 天：" + "；".join(upcoming)
+
+
+def render_time_reference(tz_name: str = "UTC", *, days: int = 7, now: datetime | None = None) -> str:
+    """时间锚点 + 未来查表 + 死命令，一次注入所有 agent 的 System Prompt。"""
+    return "\n".join(
+        (
+            render_now_reference(tz_name, now=now),
+            render_upcoming_days(tz_name, days=days, now=now),
+            TIME_ANCHOR_RULE,
+        )
+    )
 
 
 def render_date_reference(tz_name: str = "UTC", *, days: int = 7) -> str:
@@ -130,11 +213,7 @@ def render_date_reference(tz_name: str = "UTC", *, days: int = 7) -> str:
     只给一个英文日期字符串时，模型经常算错周次；把未来 7 天的「月-日 周X」
     直接列出来，映射就变成查表而不是推算。
     """
-    try:
-        tz = ZoneInfo(tz_name)
-    except (KeyError, ValueError):
-        tz = ZoneInfo("UTC")
-    today = datetime.now(tz)
+    today = _local_now(tz_name)
     lines = [
         f"今天：{today.strftime('%Y-%m-%d')}（{_CN_WEEKDAYS[today.weekday()]}）"
     ]

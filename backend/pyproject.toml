@@ -12,6 +12,8 @@ dependencies = [
     "fastapi>=0.115.0",
     "httpx>=0.28.1",
     "icalendar>=5.0.0",
+    # 记忆抽取的容错解析：LLM 偶尔输出单引号/尾逗号等"人看得懂但 json.loads 不认"的文本。
+    "json-repair>=0.30.0",
     "langchain-core>=0.3.0",
     "langchain-mcp-adapters>=0.2.0",
     "langchain-openai>=0.2.0",

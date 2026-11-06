@@ -31,6 +31,13 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel
 
+try:
+    # 可选依赖：LLM 偶尔输出单引号 / 尾逗号这类"看得懂但 json.loads 不认"的文本。
+    # 缺失时退化为严格的 json.loads，不影响主链路可用性。
+    from json_repair import repair_json as _repair_json
+except ImportError:  # pragma: no cover - 取决于是否安装了可选依赖
+    _repair_json = None
+
 logger = logging.getLogger(__name__)
 
 DEEPSEEK_BASE_URL_MARKER = "deepseek"
@@ -41,7 +48,9 @@ JSON_ONLY_INSTRUCTION = (
     "无法确定的字段填 null。"
 )
 
-_FENCED_JSON_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+# 行内围栏标签（```json / ```JSON / ```python）与裸围栏分别剥离。
+_CODE_FENCE_LABEL_RE = re.compile(r"```[A-Za-z0-9_+-]*")
+_BARE_FENCE_RE = re.compile(r"```")
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
@@ -87,25 +96,75 @@ def downgrade_response_format(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def extract_json_payload(text: str) -> dict[str, Any] | None:
-    """Parse a JSON object out of an LLM reply (tolerates ```json fences and prose)."""
-    if not text:
-        return None
-    cleaned = _FENCED_JSON_RE.sub("", text.strip()).strip()
+def strip_markdown_fences(text: str) -> str:
+    """剥离 ```json 围栏标记，保留围栏里的内容。"""
+    return _BARE_FENCE_RE.sub("", _CODE_FENCE_LABEL_RE.sub("", text)).strip()
+
+
+def json_candidates(text: str) -> list[str]:
+    """原始文本 → 去掉围栏的全文 → 首个 `[`..`]` → 首个 `{`..`}`。"""
+    cleaned = strip_markdown_fences(text)
     candidates = [cleaned]
-    first_brace, last_brace = cleaned.find("{"), cleaned.rfind("}")
-    if 0 <= first_brace < last_brace:
-        candidates.append(cleaned[first_brace: last_brace + 1])
-    for candidate in candidates:
-        if not candidate:
-            continue
-        try:
-            parsed = json.loads(candidate)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(parsed, dict):
+    for opener, closer in (("[", "]"), ("{", "}")):
+        start, end = cleaned.find(opener), cleaned.rfind(closer)
+        if 0 <= start < end:
+            candidates.append(cleaned[start : end + 1])
+    return [candidate for candidate in candidates if candidate]
+
+
+def _repair_json_candidate(candidate: str) -> Any | None:
+    """用 json_repair 容错解析（单引号、尾逗号、缺括号、Unicode 引号…）。"""
+    if _repair_json is None:
+        return None
+    try:
+        repaired = _repair_json(candidate, return_objects=True)
+    except Exception as exc:
+        logger.warning("json_repair failed on model reply: %s", exc)
+        return None
+    # json_repair 对彻底没救的文本会返回空容器/空串，不能当作解析成功。
+    if isinstance(repaired, (dict, list)) and repaired:
+        logger.info("Repaired malformed JSON from model reply")
+        return repaired
+    return None
+
+
+def _load_json_candidate(candidate: str) -> Any | None:
+    try:
+        return json.loads(candidate)
+    except (json.JSONDecodeError, TypeError):
+        return _repair_json_candidate(candidate)
+
+
+def _extract_json_of_type(text: str, wanted_type: type) -> Any | None:
+    """从 LLM 回复里取出指定类型的 JSON，容忍围栏、前后废话、轻微语法错误。"""
+    if not text or not text.strip():
+        return None
+    for candidate in json_candidates(text):
+        parsed = _load_json_candidate(candidate)
+        if isinstance(parsed, wanted_type):
             return parsed
     return None
+
+
+def extract_json_value(text: str) -> dict[str, Any] | list[Any] | None:
+    """取出回复里第一个能解析的 JSON 值（按候选出现顺序，不按类型偏好）。"""
+    if not text or not text.strip():
+        return None
+    for candidate in json_candidates(text):
+        parsed = _load_json_candidate(candidate)
+        if isinstance(parsed, (dict, list)):
+            return parsed
+    return None
+
+
+def extract_json_payload(text: str) -> dict[str, Any] | None:
+    """Parse a JSON object out of an LLM reply (tolerates ```json fences and prose)."""
+    return _extract_json_of_type(text, dict)
+
+
+def extract_json_array(text: str) -> list[Any] | None:
+    """Parse a JSON array out of an LLM reply (tolerates ```json fences and prose)."""
+    return _extract_json_of_type(text, list)
 
 
 def build_json_messages(

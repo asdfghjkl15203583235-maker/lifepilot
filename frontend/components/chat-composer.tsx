@@ -28,13 +28,10 @@ const SETTINGS_MENU_ARIA_LABEL = "连接集成";
 const SETTINGS_BUTTON_VISIBLE_LABEL = "设置";
 const SETTINGS_MENU_CONNECT_MAIL163_LABEL = "连接 163 邮箱";
 const SETTINGS_MENU_CONNECT_NOTION_LABEL = "连接 Notion";
-const SETTINGS_MENU_CONNECT_CALENDAR_LABEL = "连接日历";
 const SETTINGS_MENU_DISCONNECT_MAIL163_LABEL = "断开 163 邮箱";
 const SETTINGS_MENU_DISCONNECT_NOTION_LABEL = "断开 Notion";
-const SETTINGS_MENU_DISCONNECT_CALENDAR_LABEL = "断开日历";
 
 const INTEGRATION_ICON_MAIL163_SRC = "/icons/integrations/mail163.svg";
-const INTEGRATION_ICON_GOOGLE_CALENDAR_SRC = "/icons/integrations/google-calendar.svg";
 const INTEGRATION_ICON_NOTION_SRC = "/icons/integrations/notion.svg";
 const INTEGRATION_MENU_ICON_PX = 20;
 
@@ -311,16 +308,13 @@ function VoiceInputButton({
 export interface IntegrationStatus {
   isMail163Connected?: boolean;
   isNotionConnected?: boolean;
-  isCalendarConnected?: boolean;
 }
 
 interface ChatComposerSettingsTriggerProps {
   onConnectMail163?: () => void;
   onConnectNotion?: () => void;
-  onConnectCalendar?: () => void;
   onDisconnectMail163?: () => void;
   onDisconnectNotion?: () => void;
-  onDisconnectCalendar?: () => void;
   integrationStatus?: IntegrationStatus;
 }
 
@@ -339,10 +333,8 @@ function ConnectionDot({ isConnected }: { isConnected?: boolean }) {
 function ChatComposerSettingsTrigger({
   onConnectMail163,
   onConnectNotion,
-  onConnectCalendar,
   onDisconnectMail163,
   onDisconnectNotion,
-  onDisconnectCalendar,
   integrationStatus,
 }: ChatComposerSettingsTriggerProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -384,9 +376,7 @@ function ChatComposerSettingsTrigger({
     "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-white/90 transition hover:bg-white/10 hover:text-white focus-visible:bg-white/10 focus-visible:text-white focus-visible:outline-none";
 
   const hasAnyConnection =
-    integrationStatus?.isMail163Connected ||
-    integrationStatus?.isNotionConnected ||
-    integrationStatus?.isCalendarConnected;
+    integrationStatus?.isMail163Connected || integrationStatus?.isNotionConnected;
 
   return (
     <div ref={containerReference} className="relative">
@@ -462,29 +452,6 @@ function ChatComposerSettingsTrigger({
               : SETTINGS_MENU_CONNECT_NOTION_LABEL}
             <ConnectionDot isConnected={integrationStatus?.isNotionConnected} />
           </button>
-          <button
-            role="menuitem"
-            type="button"
-            className={menuItemClassName}
-            onClick={() =>
-              handleMenuItemActivate(
-                integrationStatus?.isCalendarConnected ? onDisconnectCalendar : onConnectCalendar,
-              )
-            }
-          >
-            <Image
-              src={INTEGRATION_ICON_GOOGLE_CALENDAR_SRC}
-              alt=""
-              width={INTEGRATION_MENU_ICON_PX}
-              height={INTEGRATION_MENU_ICON_PX}
-              className="h-5 w-5 shrink-0 object-contain"
-              unoptimized
-            />
-            {integrationStatus?.isCalendarConnected
-              ? SETTINGS_MENU_DISCONNECT_CALENDAR_LABEL
-              : SETTINGS_MENU_CONNECT_CALENDAR_LABEL}
-            <ConnectionDot isConnected={integrationStatus?.isCalendarConnected} />
-          </button>
         </div>
       ) : null}
     </div>
@@ -508,10 +475,8 @@ interface ChatComposerProps {
   onVoiceMessageSend?: (audioBlob: Blob) => void;
   onConnectMail163?: () => void;
   onConnectNotion?: () => void;
-  onConnectCalendar?: () => void;
   onDisconnectMail163?: () => void;
   onDisconnectNotion?: () => void;
-  onDisconnectCalendar?: () => void;
   /** Called after the user selects files from the attach modal (picker or drag-and-drop). */
   onFilesAttached?: (files: File[]) => void;
   integrationStatus?: IntegrationStatus;
@@ -527,10 +492,8 @@ export function ChatComposer({
   onVoiceMessageSend,
   onConnectMail163,
   onConnectNotion,
-  onConnectCalendar,
   onDisconnectMail163,
   onDisconnectNotion,
-  onDisconnectCalendar,
   onFilesAttached,
   integrationStatus,
 }: ChatComposerProps) {
@@ -687,10 +650,8 @@ export function ChatComposer({
             <ChatComposerSettingsTrigger
               onConnectMail163={onConnectMail163}
               onConnectNotion={onConnectNotion}
-              onConnectCalendar={onConnectCalendar}
               onDisconnectMail163={onDisconnectMail163}
               onDisconnectNotion={onDisconnectNotion}
-              onDisconnectCalendar={onDisconnectCalendar}
               integrationStatus={integrationStatus}
             />
           </div>

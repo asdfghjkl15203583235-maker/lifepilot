@@ -17,6 +17,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agents.city_dictionary import extract_city_by_dictionary
+
 CORE_INTENT_KEY = "core_intent"
 
 ROUTE_DIRECT = "direct"
@@ -48,9 +50,18 @@ _TEMPORAL_ONLY_RE = re.compile(
     r"[呢啊呀吧？?，,。！!]*$"
 )
 
+# 裸确认词：本身不携带任何新话题，只能理解为对上一轮提议/问题的回应。
+# 真实 badcase：助手问"需要我算到门口的路程时间吗"，用户回"需要"——
+# 旧逻辑把"需要"当独立新请求，上一轮推荐的具体地点（图书馆/自习室）全部丢失。
+_CONFIRM_FOLLOWUP_RE = re.compile(
+    r"^(需要|要|好的|好|行|可以|成|嗯|对|是的|可以啊|好呀|ok|OK)[。！!，,\s]*$"
+)
+
 _CITY_PATTERNS = (
     re.compile(
-        r"(?:去|到|飞往|前往|搬到|搬去|在|查询|看看|看看|查)\s*"
+        # "查看青岛"：前缀必须含"查看"（且排在"查"前），否则"查"被吞、
+        # 剩下"看青岛"被当成地名（真实 badcase 直接导致地点查询失败）。
+        r"(?:查看|查询|看看|去|到|飞往|前往|搬到|搬去|在|查)\s*"
         r"([一-龥]{2,8}?)(?:的)?(?:天气|气温|地图|附近)"
     ),
     re.compile(r"(?:去|到|飞往|前往|搬到|搬去)\s*([一-龥]{2,8})"),
@@ -83,6 +94,16 @@ DESTINATION_CONFIDENCE_AMBIGUOUS = 0.35
 DESTINATION_CONFIDENCE_NONE = 0.0
 DESTINATION_CONFIDENCE_INHERITED = 0.8
 
+# destination 的"来源"，用于决定要不要再走一次 LLM 校验（同城缓存的关键信号）。
+#   regex      → 正则候选，可能被动词前缀污染（「查看青岛」→「看青岛」），需 LLM 校验；
+#   dictionary → 词典精确匹配真实城市，可信，跳过 LLM；
+#   inherited  → 从历史目的地继承，已确认过，跳过 LLM（缓存命中）；
+#   none       → 没抽到地名。
+DESTINATION_SOURCE_REGEX = "regex"
+DESTINATION_SOURCE_DICTIONARY = "dictionary"
+DESTINATION_SOURCE_INHERITED = "inherited"
+DESTINATION_SOURCE_NONE = "none"
+
 
 def strip_time_tokens(text: str) -> str:
     """剔除字符串里的全部时间词，用于判定「剩下的部分还像不像地名」。"""
@@ -93,7 +114,7 @@ def strip_time_tokens(text: str) -> str:
 _LEADING_FILLER_RE = re.compile(
     r"^(麻烦|请问|请|帮我|帮忙|给我|你能|你可以|看一下|了解一下|查一下|"
     r"告诉我|想知道|问一下|查询|查看|看看|了解|一下|帮忙|帮忙|"
-    r"能|可以|在|的|和|跟|查|问)+"
+    r"能|可以|在|的|和|跟|查|问|看)+"
 )
 _FILLER_TIME_RE = re.compile(
     r"^(今天|明天|后天|大后天|今天|今晚|明早|明晚|早上|上午|中午|下午|晚上|"
@@ -198,6 +219,24 @@ def city_of_text(text: str) -> str | None:
     return None
 
 
+def extract_city_with_source(text: str) -> tuple[str | None, float, str]:
+    """正则 + 词典抽取，返回 (地名, 置信度, 来源)。
+
+    正则只能认「去北京 / 北京天气」等模式，抽不到闲聊里的地名；词典精确匹配真实
+    城市，能补上「北京挺好的」→ 北京。来源用于决定要不要再走 LLM 校验：
+      - DESTINATION_SOURCE_REGEX：正则候选，可能被动词前缀污染，需 LLM 校验；
+      - DESTINATION_SOURCE_DICTIONARY：词典精确匹配，可信，跳过 LLM；
+      - DESTINATION_SOURCE_NONE：没抽到地名。
+    """
+    candidate, confidence = city_candidate_of_text(text)
+    if candidate:
+        return candidate, confidence, DESTINATION_SOURCE_REGEX
+    dict_city = extract_city_by_dictionary(text)
+    if dict_city:
+        return dict_city, DESTINATION_CONFIDENCE_HIGH, DESTINATION_SOURCE_DICTIONARY
+    return None, confidence, DESTINATION_SOURCE_NONE
+
+
 def is_followup_utterance(text: str) -> bool:
     """True when the utterance only makes sense on top of the previous turn."""
     stripped = (text or "").strip()
@@ -206,6 +245,9 @@ def is_followup_utterance(text: str) -> bool:
     if route_of_text(stripped) and not _FOLLOWUP_PRONOUN_RE.search(stripped):
         # A full new request ("帮我查北京天气") stands on its own.
         return False
+    if _CONFIRM_FOLLOWUP_RE.match(stripped):
+        # 裸确认词（"需要""好的""行"）没有新话题，只能是对上一轮提议的回应。
+        return True
     if _TEMPORAL_ONLY_RE.match(stripped):
         return True
     if _FOLLOWUP_PRONOUN_RE.search(stripped):
@@ -213,6 +255,20 @@ def is_followup_utterance(text: str) -> bool:
         # so "那封邮件我改主意了，改成…" is not mistaken for a follow-up.
         return len(stripped) <= 24
     return False
+
+
+def _last_assistant_text(message_payloads: list[dict[str, Any]]) -> str:
+    """上一轮助手的最后一段回复，用于裸确认追问时回补被省略的待答问题。
+
+    "需要"本身不含信息，真正要执行的是上一轮提议（算到图书馆/自习室门口的路程），
+    把那段提议带进 query，agent 才知道"需要"在回答什么。
+    """
+    for item in reversed(message_payloads or []):
+        if item.get("role") == "assistant":
+            content = item.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+    return ""
 
 
 def hitl_reply_of(text: str) -> str | None:
@@ -270,35 +326,59 @@ def build_core_intent(
         topic = latest or anchor_text
         route = latest_route or anchor_route or (previous or {}).get("route") or ROUTE_DIRECT
 
-    # 实体抽取是纯正则，必须带置信度一起返回：正则抽到的可能只是时间词
-    # （「周二天气」→「周二」）。低置信度交给 entity_resolution 用 LLM 二次推理。
-    latest_destination, latest_confidence = city_candidate_of_text(latest)
-    anchor_destination, anchor_confidence = city_candidate_of_text(anchor_text)
+    # 实体抽取 = 正则 + 词典。正则可能被动词前缀污染（「查看青岛」→「看青岛」），
+    # 词典精确匹配真实城市。来源决定要不要再走 LLM 校验（同城缓存的关键信号）。
+    latest_destination, latest_confidence, latest_source = extract_city_with_source(latest)
+    anchor_destination, anchor_confidence, anchor_source = extract_city_with_source(anchor_text)
     previous_destination = ((previous or {}).get("entities") or {}).get("destination")
 
-    # 历史目的地：用户在更早的轮次明确说过「去上海」。这类事实是追问的强先验，
-    # 只依赖 anchor 会漏（anchor 往往是本轮那句「周二天气」本身）。
+    # 历史目的地：用户在更早的轮次明确说过「北京」或「去上海」。这类事实是追问的
+    # 强先验，只依赖 anchor 会漏（anchor 往往是本轮那句「周二天气」本身）。正则抽
+    # 不到的闲聊地名（「北京挺好的」）由词典兜底，从而能跨轮指代「我还想去」。
     history_destinations: list[str] = []
     for text in texts:
-        candidate, candidate_confidence = city_candidate_of_text(text)
+        candidate, candidate_confidence, _source = extract_city_with_source(text)
         if candidate and candidate_confidence >= DESTINATION_CONFIDENCE_HIGH:
             if not history_destinations or history_destinations[-1] != candidate:
                 history_destinations.append(candidate)
     history_destination = history_destinations[-1] if history_destinations else None
 
     if latest_destination is not None:
-        destination, confidence = latest_destination, latest_confidence
+        destination, confidence, source = latest_destination, latest_confidence, latest_source
     elif anchor_destination is not None:
-        destination, confidence = anchor_destination, anchor_confidence
+        destination, confidence, source = anchor_destination, anchor_confidence, anchor_source
     elif history_destination is not None:
         destination, confidence = history_destination, DESTINATION_CONFIDENCE_INHERITED
+        if latest_confidence >= DESTINATION_CONFIDENCE_AMBIGUOUS:
+            # 本轮抽到的是时间词/泛称（「周二天气」→「周二」），指代不明确，
+            # 需要 LLM 判断到底继承哪个城市。
+            source = DESTINATION_SOURCE_NONE
+        else:
+            # 本轮完全没地名暗示（「我还想去」），明确继承历史，跳过 LLM（缓存命中）。
+            source = DESTINATION_SOURCE_INHERITED
     elif isinstance(previous_destination, str) and previous_destination.strip():
         destination, confidence = previous_destination.strip(), DESTINATION_CONFIDENCE_INHERITED
+        if latest_confidence >= DESTINATION_CONFIDENCE_AMBIGUOUS:
+            source = DESTINATION_SOURCE_NONE
+        else:
+            source = DESTINATION_SOURCE_INHERITED
     else:
-        destination, confidence = None, max(latest_confidence, anchor_confidence)
+        destination, confidence, source = (
+            None,
+            max(latest_confidence, anchor_confidence),
+            DESTINATION_SOURCE_NONE,
+        )
+
+    assistant_offer = ""
+    if followup and _CONFIRM_FOLLOWUP_RE.match((latest or "").strip()):
+        # 裸确认追问：把上一轮助手的提议（含推荐地点 + 待答问题）带进 query，
+        # 否则"需要"只有一个字，agent 不知道它要算到哪个地点的路程。
+        assistant_offer = _last_assistant_text(message_payloads)
 
     if followup and anchor_text and latest:
         query = f"{anchor_text}；{latest}"
+        if assistant_offer:
+            query = f"{query}\n【上轮助手提议，待回应】{assistant_offer}"
     else:
         query = latest or anchor_text
 
@@ -307,11 +387,15 @@ def build_core_intent(
         "route": route,
         "entities": {"destination": destination} if destination else {},
         "destination_confidence": confidence,
+        # destination 来源：regex / dictionary / inherited / none，供 LLM 校验
+        # 决定要不要再问一次模型（dictionary / inherited 直接跳过，即同城缓存）。
+        "destination_source": source,
         # 给 LLM 二次推理的强先验：本会话里用户明确说过的目的地（最近 3 个）。
         "history_destinations": history_destinations[-3:],
         "followup": followup,
         "anchor": anchor_text[:200],
-        "query": query[:400],
+        "assistant_offer": assistant_offer[:600],
+        "query": query[:800],
         # LLM 二次推理要看到用户原话，而不是被模式匹配改写过的 topic。
         "latest_utterance": latest[:400],
         "hitl_reply": hitl_reply_of(latest),
@@ -331,8 +415,14 @@ def render_core_intent(core: dict[str, Any] | None) -> str:
         details.append(f"目的地/对象：{destination}")
     if core.get("followup"):
         details.append("本轮是追问，必须沿用上述主题，不得重新解释成闲聊")
-    return (
+    offer = str(core.get("assistant_offer") or "").strip()
+    rendered = (
         f"当前会话核心上下文：【{topic}】（{'；'.join(details)}）。"
         "请结合此上下文理解用户的最新消息；用户没有明确更换主题时，"
         "不得改变地点、对象或任务目标。"
     )
+    if offer:
+        rendered += (
+            f"\n【上轮助手提议】用户本轮是裸确认，需回应这条提议：{offer[:300]}"
+        )
+    return rendered

@@ -49,11 +49,6 @@ class TestAuthProtection(unittest.TestCase):
             response = client.delete("/background-jobs/00000000-0000-0000-0000-000000000001")
         self.assertEqual(response.status_code, 401)
 
-    def test_gmail_disconnect_without_auth_returns_401(self) -> None:
-        with TestClient(app) as client:
-            response = client.post("/gmail/disconnect")
-        self.assertEqual(response.status_code, 401)
-
     def test_mail163_status_without_auth_returns_401(self) -> None:
         with TestClient(app) as client:
             response = client.get("/mail163/status")
