@@ -4,7 +4,10 @@ infra/.terraform/
 infra/terraform.tfstate
 infra/terraform.tfstate.backup
 *.tfstate.lock.info
-
+AGENTS.md
+Architecture.md
+修改复盘.md
+排查与使用说明.md
 # OS
 .DS_Store
 Thumbs.db
